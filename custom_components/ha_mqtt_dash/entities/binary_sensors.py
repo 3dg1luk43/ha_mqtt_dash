@@ -19,6 +19,10 @@ class ChargingBinarySensor(BinarySensorEntity):
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)}, name=f"{device_id}")
 
     @property
+    def device_info(self) -> DeviceInfo:  # type: ignore[override]
+        return DeviceInfo(identifiers={(DOMAIN, self._device_id)}, name=f"{self._device_id}")
+
+    @property
     def unique_id(self) -> str:
         return f"{DOMAIN}:{self._device_id}:charging"
 
@@ -48,6 +52,10 @@ class OnlineBinarySensor(BinarySensorEntity):
         self._unsub: Optional[Callable[[], None]] = None
         # Fixed topic per device in integration namespace
         self._status_topic = f"mqttdash/dev/{device_id}/status"
+
+    @property
+    def device_info(self) -> DeviceInfo:  # type: ignore[override]
+        return DeviceInfo(identifiers={(DOMAIN, self._device_id)}, name=f"{self._device_id}")
 
     @property
     def unique_id(self) -> str:

@@ -13,6 +13,10 @@ class _BaseDeviceEntity(SensorEntity):
         self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)}, name=f"{device_id}")
 
+    @property
+    def device_info(self) -> DeviceInfo:  # type: ignore[override]
+        return DeviceInfo(identifiers={(DOMAIN, self._device_id)}, name=f"{self._device_id}")
+
 
 class BatteryLevelSensor(_BaseDeviceEntity):
     _attr_name = "Battery"

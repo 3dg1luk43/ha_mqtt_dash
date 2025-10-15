@@ -28,6 +28,10 @@ class OrientationSelect(SelectEntity):
         self._unsub = async_dispatcher_connect(hass, SIGNAL_DEVICE_SETTINGS_UPDATED, self._on_settings_update)
 
     @property
+    def device_info(self) -> DeviceInfo:  # type: ignore[override]
+        return DeviceInfo(identifiers={(DOMAIN, self._device_id)}, name=f"{self._device_id}")
+
+    @property
     def unique_id(self) -> str:
         return f"{DOMAIN}:{self._device_id}:orientation"
 

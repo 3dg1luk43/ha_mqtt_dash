@@ -1,14 +1,20 @@
 {
-  "domain": "ha_mqtt_dash",
-  "name": "iPad MQTT Dashboard",
-  "version": "0.4.5",
-  "documentation": "https://github.com/3dg1luk43/ha_mqtt_dash",
-  "issue_tracker": "https://github.com/3dg1luk43/ha_mqtt_dash/issues",
-  "codeowners": ["@3dg1luk43"],
+  "codeowners": [
+    "@3dg1luk43"
+  ],
   "config_flow": true,
+  "dependencies": [
+    "mqtt"
+  ],
+  "documentation": "https://github.com/3dg1luk43/ha_mqtt_dash",
+  "domain": "ha_mqtt_dash",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "dependencies": ["mqtt"],
+  "issue_tracker": "https://github.com/3dg1luk43/ha_mqtt_dash/issues",
+  "loggers": [
+    "ha_mqtt_dash"
+  ],
+  "name": "iPad MQTT Dashboard",
   "requirements": [],
-  "loggers": ["ha_mqtt_dash"]
+  "version": "0.4.6"
 }

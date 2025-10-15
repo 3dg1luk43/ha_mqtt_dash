@@ -38,6 +38,10 @@ class BrightnessNumber(NumberEntity):
         )
 
     @property
+    def device_info(self) -> DeviceInfo:  # type: ignore[override]
+        return DeviceInfo(identifiers={(DOMAIN, self._device_id)}, name=f"{self._device_id}")
+
+    @property
     def unique_id(self) -> str:
         return f"{DOMAIN}:{self._device_id}:brightness"
 

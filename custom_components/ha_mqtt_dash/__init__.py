@@ -23,16 +23,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("ha_mqtt_dash: async_setup_entry starting")
     hass.data.setdefault(DOMAIN, {})
     bridge = MqttBridge(hass, entry)
+    # Helper: ensure a HA device exists in the registry for each configured device_id.
+    # This makes entities show under a device even if created before first hello.
+    def _ensure_devices_in_registry(cfg: dict) -> None:
+        try:
+            dev_reg = async_get_dev_reg(hass)
+            devices = list((cfg or {}).get("devices", []) or [])
+            for d in devices:
+                did = (d or {}).get("device_id")
+                if isinstance(did, str) and did.strip():
+                    dev_reg.async_get_or_create(
+                        config_entry_id=entry.entry_id,
+                        identifiers={(DOMAIN, did)},
+                        name=did,
+                    )
+        except Exception:
+            _LOGGER.debug("ensure_devices_in_registry: skipped (registry op failed)", exc_info=True)
     # Register update listener BEFORE bridge async_setup so any options writes during
     # storage initialization are observed by the bridge.
     async def _on_update(hass: HomeAssistant, updated: ConfigEntry):
         _LOGGER.debug("ha_mqtt_dash: options updated -> forwarding to bridge")
         await bridge.async_options_updated(updated)
+        try:
+            cfg = {**(updated.data or {}), **(updated.options or {})}
+            _ensure_devices_in_registry(cfg)
+        except Exception:
+            _LOGGER.debug("post-update ensure_devices_in_registry failed", exc_info=True)
     entry.async_on_unload(entry.add_update_listener(_on_update))
 
     await bridge.async_setup()
     hass.data[DOMAIN][entry.entry_id] = bridge
     _LOGGER.debug("ha_mqtt_dash: bridge setup complete; registering services")
+    # Ensure device objects exist up front so UI groups entities under a device immediately
+    try:
+        cfg_now = {**(entry.data or {}), **(entry.options or {})}
+        _ensure_devices_in_registry(cfg_now)
+    except Exception:
+        _LOGGER.debug("initial ensure_devices_in_registry failed", exc_info=True)
 
     # admin/services
     async def _svc_push_config(call):
