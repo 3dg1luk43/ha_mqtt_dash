@@ -8,7 +8,12 @@ This repository contains the Home Assistant custom integration that powers the i
 - Namespace: fixed `mqttdash/*` for configs, device topics, commands, and mirrored state
 
 Quick start:
-1) Create a dedicated MQTT user (broker add‑on) and keep it LAN‑only. 2) Install the integration via HACS and add it; you’ll enter the first device_id and get a starter profile. 3) Install the iPad app (.deb) and enter broker + device_id; the UI renders from the retained config.
+1) Create a dedicated MQTT user (broker add‑on) and keep it LAN‑only. 
+2) Install the integration via HACS and add it; you’ll enter the first device_id and get a starter profile. 
+3) Install the iPad app (.deb) and enter broker + device_id; the UI renders from the retained config.
+
+Prebuilt app packages
+- The signed .deb packages produced by the release flow are published under this repository’s `releases/` folder for easy download.
 
 ## Start here
 - [Supported devices](docs/supported_devices.md)
