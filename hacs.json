@@ -1,0 +1,9 @@
+{
+	"name": "iPad MQTT Dashboard",
+	"render_readme": true,
+	"homeassistant": "2024.6.0",
+	"content_in_root": false,
+	"country": ["CZ"],
+	"categories": ["Integration"],
+	"zip_release": false
+}
