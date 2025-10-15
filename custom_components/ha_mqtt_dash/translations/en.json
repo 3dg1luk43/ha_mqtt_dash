@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": { "title": "iPad MQTT Dashboard", "description": "MQTT base topics" },
+      "add_profile": { "title": "Create Profile", "description": "Create initial profile/grid" },
+      "add_device": { "title": "Add Device", "description": "Bind a device_id to a profile" }
+    }
+  },
+  "options": {
+    "abort": {
+      "no_devices": "No devices are onboarded yet. Open the app so it registers, or add a device in the integration's initial setup."
+    },
+    "error": {
+      "invalid_json": "Invalid JSON. Please fix the profile and try again."
+    },
+    "step": {
+      "init": {
+        "title": "Options",
+        "description": "Select a section",
+        "menu_options": {
+          "profiles_device": "Edit device profile (JSON)",
+          "devices_add": "Add device manually",
+          "mirror": "Select entities to mirror to MQTT",
+          "topics": "Edit base topics",
+          "guide": "Quick setup guide"
+        }
+      },
+  "profiles_device": { "title": "Device Profile", "description": "Edit JSON for selected device" },
+  "devices_add": { "title": "Add Device", "description": "Create device entry and empty profile" },
+      "mirror": { "title": "Mirror", "description": "Select entities to mirror" },
+      "topics": { "title": "Topics", "description": "Base topics" },
+      "guide": { "title": "Quick Guide", "description": "Connection hints and test publish" }
+    }
+  }
+}

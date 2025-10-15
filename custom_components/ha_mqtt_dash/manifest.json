@@ -1,0 +1,20 @@
+{
+  "codeowners": [
+    "@3dg1luk43"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "mqtt"
+  ],
+  "documentation": "https://github.com/3dg1luk43/ha_mqtt_dash",
+  "domain": "ha_mqtt_dash",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/3dg1luk43/ha_mqtt_dash/issues",
+  "loggers": [
+    "ha_mqtt_dash"
+  ],
+  "name": "iPad MQTT Dashboard",
+  "requirements": [],
+  "version": "0.4.5"
+}

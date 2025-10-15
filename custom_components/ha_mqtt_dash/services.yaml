@@ -1,0 +1,139 @@
+notify:
+  name: Send device notification
+  description: Send a notification popup to a specific device.
+  fields:
+    device_id:
+      description: Optional direct mqttdash device_id (overrides ha_device)
+      example: ipad1-lr
+      required: false
+      selector:
+        text:
+    ha_device:
+      name: Target device (HA device registry)
+      description: Select the HA device that represents the iPad dashboard.
+      required: false
+      selector:
+        device:
+          entity:
+            integration: ha_mqtt_dash
+    message:
+      description: Notification body text
+      example: "Washer finished"
+      required: true
+      selector:
+        text:
+    title:
+      description: Optional title
+      example: "Laundry"
+      required: false
+      selector:
+        text:
+
+# Notify platform dynamic services are registered as notify.mqttdash_<device_id>.
+# Example service call:
+# service: notify.mqttdash_ipad1_lr
+# data:
+#   title: Front Door
+#   message: Doorbell rang
+push_config:
+  name: Publish dashboard configs
+  description: Publish retained configs to mqttdash/config/<device_id>/config for all devices.
+
+reload_config:
+  name: Reload dashboard configs
+  description: Re-publish retained configs (same as push_config).
+
+set_device_settings:
+  name: Set device settings
+  description: Send live settings to a device (brightness 0.0–1.0, keep_awake true/false, orientation auto/portrait/landscape).
+  fields:
+    device_id:
+      required: true
+      example: ipad1-lr
+      selector:
+        text:
+    brightness:
+      required: false
+      example: 0.35
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.01
+          mode: box
+    keep_awake:
+      required: false
+      example: true
+      selector:
+        boolean:
+    orientation:
+      required: false
+      example: auto
+      selector:
+        select:
+          options:
+            - auto
+            - portrait
+            - landscape
+
+publish_snapshot:
+  name: Publish snapshot for mirrored entities
+  description: Publish retained state/attributes for all selected entities.
+
+
+set_device_profile:
+  name: Set device profile JSON
+  description: Overwrite the JSON profile for a device (keyed by device_id) and republish+reload.
+  fields:
+    device_id:
+      required: true
+      example: ipad1-lr
+      selector: { text: {} }
+    profile:
+      required: true
+      example: '{"ui":{"widgets":[]}}'
+      selector:
+        object:
+
+dump_store:
+  name: Dump HA Store contents
+  description: Log and optionally publish the current Store (profiles and device_settings) as JSON.
+  fields:
+    publish:
+      required: false
+      default: false
+      selector: { boolean: {} }
+    topic:
+      required: false
+      example: mqttdash/debug/ha_mqtt_dash/store_dump
+      selector: { text: {} }
+
+dump_runtime_cfg:
+  name: Dump merged runtime config
+  description: Log and optionally publish the current merged runtime configuration (data+options).
+  fields:
+    publish:
+      required: false
+      default: false
+      selector: { boolean: {} }
+    topic:
+      required: false
+      example: mqttdash/debug/ha_mqtt_dash/runtime_cfg
+      selector: { text: {} }
+
+dump_device_config:
+  name: Dump built device config
+  description: Build and log the exact JSON config for a specific device; optionally publish to an MQTT topic.
+  fields:
+    device_id:
+      required: true
+      example: testipad
+      selector: { text: {} }
+    publish:
+      required: false
+      default: false
+      selector: { boolean: {} }
+    topic:
+      required: false
+      example: mqttdash/debug/testipad/config
+      selector: { text: {} }
