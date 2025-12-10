@@ -1,3 +1,6 @@
+![Installs](https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=Installations&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.ha_mqtt_dash.total)
+![Latest](https://img.shields.io/github/v/release/3dg1luk43/ha_mqtt_dash)
+
 # Home Assistant MQTT Dashboard
 
 This repository contains the Home Assistant custom integration that powers the iPad MQTT Dashboard.
