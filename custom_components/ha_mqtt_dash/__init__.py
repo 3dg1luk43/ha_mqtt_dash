@@ -1,8 +1,9 @@
 from __future__ import annotations
 import logging
+import time as _time
 from homeassistant.core import HomeAssistant  # type: ignore
 from homeassistant.config_entries import ConfigEntry  # type: ignore
-from .const import DOMAIN
+from .const import DOMAIN, CONF_API_ENABLED, CONF_API_UNTIL_KEY
 import json
 from .storage import StorageHelper
 import voluptuous as vol  # type: ignore
@@ -12,6 +13,7 @@ from homeassistant.helpers import device_registry as dr  # type: ignore
 
 PLATFORMS = ["sensor", "binary_sensor", "switch", "select", "number", "button", "notify"]
 from .mqtt_bridge import MqttBridge
+from .views import register_apply_profile_route
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,9 +46,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _on_update(hass: HomeAssistant, updated: ConfigEntry):
         _LOGGER.debug("ha_mqtt_dash: options updated -> forwarding to bridge")
         await bridge.async_options_updated(updated)
+        # Refresh push-API expiry window so toggling API Access takes effect immediately
+        # without requiring a full integration reload.
+        opts = {**(updated.data or {}), **(updated.options or {})}
+        api_until = (_time.time() + 600) if opts.get(CONF_API_ENABLED) else 0
+        hass.data[CONF_API_UNTIL_KEY] = api_until
+        _LOGGER.debug("ha_mqtt_dash: push API %s after options update", "enabled +10min" if api_until else "disabled")
         try:
-            cfg = {**(updated.data or {}), **(updated.options or {})}
-            _ensure_devices_in_registry(cfg)
+            _ensure_devices_in_registry(opts)
         except Exception:
             _LOGGER.debug("post-update ensure_devices_in_registry failed", exc_info=True)
     entry.async_on_unload(entry.add_update_listener(_on_update))
@@ -54,6 +61,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await bridge.async_setup()
     hass.data[DOMAIN][entry.entry_id] = bridge
     _LOGGER.debug("ha_mqtt_dash: bridge setup complete; registering services")
+    register_apply_profile_route(hass)
+    # Set the push-API expiry window. The route is always registered but the
+    # handler checks this timestamp and returns 403 when outside the window.
+    opts = {**entry.data, **entry.options}
+    api_until = (_time.time() + 600) if opts.get(CONF_API_ENABLED) else 0
+    hass.data[CONF_API_UNTIL_KEY] = api_until
+    _LOGGER.debug(
+        "ha_mqtt_dash: push API %s",
+        f"enabled until +10min" if api_until else "disabled",
+    )
     # Ensure device objects exist up front so UI groups entities under a device immediately
     try:
         cfg_now = {**(entry.data or {}), **(entry.options or {})}

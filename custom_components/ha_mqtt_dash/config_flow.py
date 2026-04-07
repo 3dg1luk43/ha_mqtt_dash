@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import logging
+import time as _time
 import voluptuous as vol  # type: ignore
 from homeassistant import config_entries  # type: ignore
 from homeassistant.core import callback # type: ignore
@@ -10,6 +11,9 @@ from .const import (
     DOMAIN,
     CONF_DEVICES, CONF_PROFILES,
     CONF_MIRROR_ENTITIES,
+    CONF_MIRROR_AUTO,
+    CONF_API_ENABLED,
+    CONF_API_UNTIL_KEY,
 )
 
 STEP_USER = vol.Schema({
@@ -103,6 +107,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 "profiles_device",
                 "devices_add",
                 "mirror",
+                "entity_list",
+                "api_access",
             ],
         )
 
@@ -385,48 +391,104 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     # Mirror picker
     async def async_step_mirror(self, user_input=None):
+        mirror_auto_default = bool(self._data.get(CONF_MIRROR_AUTO, False))
         schema = vol.Schema({
+            vol.Optional(CONF_MIRROR_AUTO, default=mirror_auto_default): selector.BooleanSelector(),
             vol.Optional(CONF_MIRROR_ENTITIES, default=self._mirror_entities): selector.EntitySelector(
                 selector.EntitySelectorConfig(multiple=True)
             ),
         })
         if user_input is None:
             logging.getLogger(__name__).debug("options_flow:mirror form presented")
-            return self.async_show_form(step_id="mirror", data_schema=schema)
+            return self.async_show_form(step_id="mirror", data_schema=schema,
+                description_placeholders={"note": "Enable Auto to mirror all entities from your profile widgets automatically. Manual list is used when Auto is off."})
+        mirror_auto = bool(user_input.get(CONF_MIRROR_AUTO, False))
         ents = list(user_input.get(CONF_MIRROR_ENTITIES, []) or [])
-        logging.getLogger(__name__).debug("options_flow:mirror saving count=%d", len(ents))
+        logging.getLogger(__name__).debug("options_flow:mirror saving auto=%s count=%d", mirror_auto, len(ents))
         # Strip legacy keys from options payload on save
         self._data.pop("mirror_enabled", None)
         self._data.pop("mirror_attributes", None)
+        self._data[CONF_MIRROR_AUTO] = mirror_auto
         self._data[CONF_MIRROR_ENTITIES] = ents
         return self.async_create_entry(title="", data=self._data)
 
     # (Topics step removed; all base topics fixed to mqttdash/*)
 
-    # Advanced step removed: republishing occurs automatically on save, and device removal uses HA's Delete Device
-    # Quick guide
-    async def async_step_guide(self, user_input=None):
-        logging.getLogger(__name__).debug("options_flow:guide opened")
-        tips = []
-        host = "homeassistant.local"
-        hass_ip = getattr(self.hass.config, "api", None) and self.hass.config.api.host or ""
-        tips.append(f"Broker host: {host} (or {hass_ip})")
-        tips.append("Port: 1883 (no TLS)")
-        tips.append("Create MQTT user/pass in Mosquitto add-on and assign to the app.")
-        tips.append("Retained config: mqttdash/config/<device_id>/config")
-        tips.append("Device settings: mqttdash/dev/<device_id>/settings")
-        tips.append("Device hello: mqttdash/dev/<device_id>/hello")
-        tips.append("Device status LWT: mqttdash/dev/<device_id>/status")
-        tips.append("Entity commands: mqttdash/cmd/<entity_id>")
-        tips.append("Mirrored states: mqttdash/statestream/<domain>/<object>/state")
+    # Entity reference: shows entities derived from profiles + all HA entities
+    async def async_step_entity_list(self, user_input=None):
+        logging.getLogger(__name__).debug("options_flow:entity_list opened")
+        if user_input is not None:
+            return await self.async_step_init()
 
-        schema = vol.Schema({vol.Optional("publish_test", default=False): bool})
+        # Extract entity IDs referenced in profile widgets
+        try:
+            from .mqtt_bridge import _extract_entities_from_profiles
+            profs = dict(self._profiles or {})
+            profile_ents = _extract_entities_from_profiles(profs)
+        except Exception:
+            profile_ents = []
+
+        # All registered HA entities
+        try:
+            from homeassistant.helpers import entity_registry as er
+            ent_reg = er.async_get(self.hass)
+            all_ents = sorted(e.entity_id for e in ent_reg.entities.values())
+        except Exception:
+            all_ents = []
+
+        mirror_auto = bool(self._data.get(CONF_MIRROR_AUTO, False))
+        manual_ents = list(self._data.get(CONF_MIRROR_ENTITIES, []) or [])
+
+        profile_txt = "\n".join(profile_ents) if profile_ents else "(none)"
+        manual_txt = "\n".join(manual_ents) if manual_ents else "(none)"
+        # All entities as a selectable textarea — click in, Ctrl+A, Ctrl+C
+        all_txt = "\n".join(all_ents) if all_ents else ""
+
+        return self.async_show_form(
+            step_id="entity_list",
+            data_schema=vol.Schema({
+                vol.Optional("all_entities", default=all_txt): selector.TextSelector(
+                    selector.TextSelectorConfig(multiline=True)
+                ),
+            }),
+            description_placeholders={
+                "mirror_mode": "Auto (from profiles)" if mirror_auto else "Manual (from mirror list)",
+                "profile_entities": profile_txt,
+                "manual_entities": manual_txt,
+            },
+        )
+
+    # API Access: time-limited enable for the profile editor push endpoint
+    async def async_step_api_access(self, user_input=None):
+        logging.getLogger(__name__).debug("options_flow:api_access opened")
+
+        api_until = self.hass.data.get(CONF_API_UNTIL_KEY, 0)
+        remaining = max(0, int(api_until - _time.time()))
+        if remaining > 0:
+            status = f"Active — {remaining // 60}m {remaining % 60}s remaining"
+        else:
+            status = "Disabled"
+
+        schema = vol.Schema({
+            vol.Optional(CONF_API_ENABLED, default=False): selector.BooleanSelector(),
+        })
+
         if user_input is None:
-            return self.async_show_form(step_id="guide", data_schema=schema,
-                                        description_placeholders={"text": "\n".join(tips)})
+            return self.async_show_form(
+                step_id="api_access",
+                data_schema=schema,
+                description_placeholders={"status": status},
+            )
 
-        if user_input.get("publish_test"):
-            from homeassistant.components import mqtt # type: ignore
-            logging.getLogger(__name__).debug("options_flow:guide publishing test hello")
-            await mqtt.async_publish(self.hass, "mqttdash/dev/test/hello", '{"hello":true}', qos=0, retain=False)
+        enable = bool(user_input.get(CONF_API_ENABLED, False))
+        self._data[CONF_API_ENABLED] = enable
+        # Update api_until directly so it takes effect immediately, even if
+        # CONF_API_ENABLED was already True (HA won't fire the update listener
+        # when options haven't changed, so we can't rely on it alone).
+        api_until = (_time.time() + 600) if enable else 0
+        self.hass.data[CONF_API_UNTIL_KEY] = api_until
+        logging.getLogger(__name__).debug(
+            "api_access: api_until set to %s",
+            "now+10min" if api_until else "disabled",
+        )
         return self.async_create_entry(title="", data=self._data)

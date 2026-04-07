@@ -21,6 +21,7 @@ from .const import (
     CONF_DEVICES,
     CONF_PROFILES,
     CONF_MIRROR_ENTITIES,
+    CONF_MIRROR_AUTO,
     DOMAIN,
     SIGNAL_DEVICE_SETTINGS_UPDATED,
     FIXED_CONFIG_BASE, FIXED_DEVICE_BASE, FIXED_COMMAND_BASE, FIXED_STATESTREAM_BASE,
@@ -47,6 +48,79 @@ def _payload_to_str(msg) -> str:
     # HA often gives str already
     return str(p)
 
+_WIDGET_ENTITY_FIELDS = (
+    "entity_id", "entity", "eid",
+    # Printer widget
+    "nozzle_entity", "bed_entity", "progress_entity", "status_entity",
+    # Sous vide widget
+    "temp_entity", "target_entity",
+    # Appliance / printer / sous vide shared
+    "time_entity",
+    # Generic program name sensor
+    "program_entity",
+)
+
+
+def _extract_entities_from_profiles(profiles: Dict[str, Any]) -> List[str]:
+    """Return sorted unique entity IDs referenced across all profile widget and layout definitions."""
+    entities: set = set()
+
+    def _scan_widget(w: dict) -> None:
+        """Extract all entity IDs from a single widget dict."""
+        if not isinstance(w, dict):
+            return
+        for field in _WIDGET_ENTITY_FIELDS:
+            v = w.get(field)
+            if isinstance(v, str) and "." in v:
+                entities.add(v.strip().lower())
+        # Camera overlay button entity
+        ob = w.get("overlay_button")
+        if isinstance(ob, dict):
+            v = ob.get("entity_id")
+            if isinstance(v, str) and "." in v:
+                entities.add(v.strip().lower())
+
+    def _collect_widgets(src: dict) -> None:
+        """Recursively collect widgets from a profile/ui/page dict."""
+        if not isinstance(src, dict):
+            return
+        # Flat widgets list
+        if isinstance(src.get("widgets"), list):
+            for w in src["widgets"]:
+                _scan_widget(w)
+        # Pages array — each page may have its own widgets list
+        if isinstance(src.get("pages"), list):
+            for page in src["pages"]:
+                if isinstance(page, dict):
+                    _collect_widgets(page)
+        # Layout shorthand: ["light.kitchen", "sensor.temp(2x1)", ...]
+        if isinstance(src.get("layout"), list):
+            for row in src["layout"]:
+                items = row if isinstance(row, list) else ([row] if isinstance(row, str) else [])
+                for item in items:
+                    if isinstance(item, str):
+                        ent = item.split("(")[0].strip().lower()
+                        if "." in ent and ent not in ("spacer",):
+                            entities.add(ent)
+
+    for prof in (profiles or {}).values():
+        if not isinstance(prof, dict):
+            continue
+        # Unwrap single-key wrapper (e.g. {"main_panel": {...}})
+        if len(prof) == 1:
+            only = next(iter(prof.values()))
+            if isinstance(only, dict) and any(k in only for k in ("widgets", "ui", "pages", "layout", "dashboard")):
+                prof = only
+        # Scan top-level and ui/dashboard sub-dicts
+        _collect_widgets(prof)
+        for key in ("ui", "dashboard"):
+            sub = prof.get(key)
+            if isinstance(sub, dict):
+                _collect_widgets(sub)
+
+    return sorted(entities)
+
+
 class MqttBridge:
     """Bridge HA <-> iOS dashboard via MQTT."""
 
@@ -67,7 +141,13 @@ class MqttBridge:
         self._mirror_unsub: Optional[Any] = None
 
         # Mirror tracking
-        self._last_mirror_set = set(self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])
+        self._mirror_wanted: List[str] = []  # effective entity list (auto-derived or manual)
+        if self.cfg.get(CONF_MIRROR_AUTO):
+            self._last_mirror_set = set(_extract_entities_from_profiles(
+                dict(self.cfg.get(CONF_PROFILES, {}) or {})
+            ))
+        else:
+            self._last_mirror_set = set(self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])
         # Track last-published state and attributes per entity for proper retained dedupe/purge
         # _last_state["domain.object"] = "last_state_str"
         self._last_state = {}
@@ -399,7 +479,10 @@ class MqttBridge:
             len(self.cfg.get(CONF_MIRROR_ENTITIES, []) or []),
         )
 
-        new_mirror = set(self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])
+        if self.cfg.get(CONF_MIRROR_AUTO):
+            new_mirror = set(_extract_entities_from_profiles(dict(self.cfg.get(CONF_PROFILES, {}) or {})))
+        else:
+            new_mirror = set(self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])
         removed_mirror = self._last_mirror_set - new_mirror
         added_mirror = new_mirror - self._last_mirror_set
         if removed_mirror:
@@ -717,6 +800,9 @@ class MqttBridge:
         base_stream = FIXED_STATESTREAM_BASE
         base_cmd = FIXED_COMMAND_BASE
 
+        # Widget types that don't require an entity_id (use specialized entity fields instead)
+        _NO_ENTITY_TYPES = ("label", "clock", "timer", "camera", "webpage", "mealie", "printer")
+
         def _coerce_int(v: Any, default: int) -> int:
             try:
                 if isinstance(v, bool):
@@ -725,138 +811,230 @@ class MqttBridge:
             except Exception:
                 return default
 
-        for idx, it in enumerate(widgets or []):
+        def _normalize_one(it: Any, idx: int) -> Optional[Dict[str, Any]]:
+            """Normalize one widget dict — generate MQTT topics from entity refs."""
             if not isinstance(it, dict):
-                continue
+                return None
             wdef = dict(it)
-            # Extract entity id from several possible keys
             ent = wdef.get("entity_id") or wdef.get("entity") or wdef.get("eid") or ""
             if isinstance(ent, str):
                 ent = ent.strip()
             else:
                 ent = ""
-            # Determine type early to allow label/clock widgets without entity_id
             wtype = (wdef.get("type") or "").strip().lower() if isinstance(wdef.get("type"), str) else ""
-            # Skip spacers explicitly; but allow label/clock widgets even with no entity
             if wtype == "spacer":
-                continue
-            # Skip invalid entries that have neither an entity nor a supported non-entity type
-            if not ent and wtype not in ("label", "clock"):
-                continue
+                return None
+            if not ent and wtype not in _NO_ENTITY_TYPES:
+                return None
 
             # Position aliases
-            x = wdef.get("x", wdef.get("col"))
-            y = wdef.get("y", wdef.get("row"))
-            w = wdef.get("w", wdef.get("colspan"))
-            h = wdef.get("h", wdef.get("rowspan"))
-            xi = _coerce_int(x, 0)
-            yi = _coerce_int(y, 0)
-            wi = max(1, _coerce_int(w, 1))
-            hi = max(1, _coerce_int(h, 1))
+            xi = _coerce_int(wdef.get("x", wdef.get("col")), 0)
+            yi = _coerce_int(wdef.get("y", wdef.get("row")), 0)
+            wi = max(1, _coerce_int(wdef.get("w", wdef.get("colspan")), 1))
+            hi = max(1, _coerce_int(wdef.get("h", wdef.get("rowspan")), 1))
 
-            # Determine type (if not set by user, infer from entity domain)
             dom = None
             obj = None
             if "." in ent:
                 try:
                     dom, obj = ent.split(".", 1)
                 except Exception:
-                    dom, obj = None, None
+                    pass
             if not wtype:
-                if dom == "light":
-                    wtype = "light"
-                elif dom in ("switch", "input_boolean"):
-                    wtype = "switch"
-                elif dom == "scene":
-                    wtype = "scene"
-                elif dom in ("script", "button"):
-                    wtype = "button"
-                elif dom == "person":
-                    wtype = "person"
-                else:
-                    wtype = "sensor"
+                if dom == "light": wtype = "light"
+                elif dom in ("switch", "input_boolean"): wtype = "switch"
+                elif dom == "scene": wtype = "scene"
+                elif dom in ("script", "button"): wtype = "button"
+                elif dom == "person": wtype = "person"
+                else: wtype = "sensor"
 
-            # Build topics
-            state_topic = None
+            state_topic = f"{base_stream}/{dom}/{obj}/state" if dom and obj else ""
             cmd_topic = None
-            if dom and obj:
-                state_topic = f"{base_stream}/{dom}/{obj}/state"
-                if wtype in ("light", "switch", "button"):
-                    cmd_topic = f"{base_cmd}/{ent}"
+            if wtype in ("light", "switch", "button", "scene", "climate", "mediaplayer") and ent and "." in ent:
+                cmd_topic = f"{base_cmd}/{ent}"
+            # Local-only widgets have no MQTT state
+            if wtype in _NO_ENTITY_TYPES:
+                state_topic = ""
 
-            # Compose normalized widget
             out: Dict[str, Any] = {
-                "id": wdef.get("id") or f"p:{idx}:{ent}",
+                "id": wdef.get("id") or f"p:{idx}:{ent or wtype}",
                 "type": wtype,
                 "entity_id": ent,
-                "label": (wdef.get("label") or wdef.get("lbl") or ent),
+                "label": (wdef.get("label") or wdef.get("lbl") or ent or wtype),
                 "x": xi, "y": yi, "w": wi, "h": hi,
-                "state_topic": state_topic or "",
+                "state_topic": state_topic,
             }
-            # Optional protection flag
-            try:
-                p = wdef.get("protected")
-                if isinstance(p, (bool, int)):
-                    out["protected"] = bool(p)
-            except Exception:
-                pass
             if cmd_topic:
                 out["command_topic"] = cmd_topic
-            # Optional unit for sensor displays
-            try:
-                u = wdef.get("unit")
-                if isinstance(u, str) and u.strip():
-                    out["unit"] = u.strip()
-            except Exception:
-                pass
-            # Optional format (alignment, sizes, colors)
-            try:
-                fmt = wdef.get("format")
-                if isinstance(fmt, dict) and len(fmt) > 0:
-                    # Whitelist known keys to keep payload lean
-                    allowed = {
-                        "align", "vAlign", "textSize", "textColor", "bgColor",
-                        "onTextColor", "offTextColor", "onBgColor", "offBgColor",
-                        "wrap", "maxLines",
-                    }
-                    sanitized = {k: v for (k, v) in fmt.items() if k in allowed and isinstance(v, (str, int, float))}
-                    if sanitized:
-                        out["format"] = sanitized
-            except Exception:
-                pass
-            # Optional brightness attr for lights
-            if dom == "light" and obj:
-                out["attr_topic"] = f"{base_stream}/{dom}/{obj}/attributes/brightness"
+            p = wdef.get("protected")
+            if isinstance(p, (bool, int)):
+                out["protected"] = bool(p)
+            u = wdef.get("unit")
+            if isinstance(u, str) and u.strip():
+                out["unit"] = u.strip()
+            fmt = wdef.get("format")
+            if isinstance(fmt, dict) and fmt:
+                allowed = {
+                    "align", "vAlign", "textSize", "textColor", "bgColor",
+                    "onTextColor", "offTextColor", "onBgColor", "offBgColor",
+                    "wrap", "maxLines",
+                }
+                sanitized = {k: v for k, v in fmt.items() if k in allowed and isinstance(v, (str, int, float))}
+                if sanitized:
+                    out["format"] = sanitized
 
-            # Label widget support: allow type=label without entity_id; carry 'text'
-            if wtype == "label" and not ent:
+            # Light: brightness attribute topic (skipped when dimmable is explicitly False)
+            if wtype == "light" and dom == "light" and obj:
+                _dimmable = wdef.get("dimmable")
+                if _dimmable is False:
+                    out["dimmable"] = False
+                else:
+                    out["attr_topic"] = f"{base_stream}/{dom}/{obj}/attributes/brightness"
+
+            # Label: text field
+            if wtype == "label":
                 txt = wdef.get("text")
                 if isinstance(txt, str):
                     out["text"] = txt
-                # No topics for label; ensure state_topic empty
-                out["state_topic"] = ""
 
-            # Clock widget: no entity; purely local time render; support optional time_pattern
+            # Clock: time_pattern
             if wtype == "clock":
-                out["state_topic"] = ""
                 pat = wdef.get("time_pattern")
                 if isinstance(pat, str) and pat.strip():
                     out["time_pattern"] = pat.strip()
 
-            # Weather widget: support attrs mapping and base attr topic
+            # Timer: default_seconds, configurable
+            if wtype == "timer":
+                ds = wdef.get("default_seconds")
+                if isinstance(ds, (int, float)):
+                    out["default_seconds"] = int(ds)
+                c = wdef.get("configurable")
+                if isinstance(c, bool):
+                    out["configurable"] = c
+
+            # Climate: attr_base for temperatures, modes, state_formats
+            if wtype == "climate":
+                if dom and obj:
+                    out["attr_base"] = f"{base_stream}/{dom}/{obj}/attributes"
+                modes = wdef.get("modes")
+                if isinstance(modes, list):
+                    out["modes"] = modes
+                sf = wdef.get("state_formats")
+                if isinstance(sf, dict):
+                    out["state_formats"] = sf
+
+            # Weather: attr_base, attrs, attr_units
             if wtype == "weather" and dom == "weather" and obj:
                 out["attr_base"] = f"{base_stream}/{dom}/{obj}/attributes"
                 attrs = wdef.get("attrs")
                 if isinstance(attrs, list) and attrs:
                     out["attrs"] = [a for a in attrs if isinstance(a, str)]
-                units = wdef.get("attr_units")
-                if isinstance(units, dict) and units:
-                    # Keep simple key->str mapping
-                    out["attr_units"] = {k: v for (k, v) in units.items() if isinstance(k, str) and isinstance(v, str)}
+                attr_units = wdef.get("attr_units")
+                if isinstance(attr_units, dict) and attr_units:
+                    out["attr_units"] = {k: v for k, v in attr_units.items() if isinstance(k, str) and isinstance(v, str)}
 
-            norm_widgets.append(out)
+            # Helper: entity field → statestream topic
+            def _ent_t(field: str, key: str) -> None:
+                e = wdef.get(field)
+                if isinstance(e, str) and "." in e:
+                    ed, eo = e.split(".", 1)
+                    out[key] = f"{base_stream}/{ed}/{eo}/state"
+
+            # Printer: per-sensor topics
+            if wtype == "printer":
+                _ent_t("nozzle_entity", "nozzle_topic")
+                _ent_t("bed_entity", "bed_topic")
+                _ent_t("time_entity", "time_topic")
+                _ent_t("progress_entity", "progress_topic")
+                _ent_t("status_entity", "status_topic")
+                pu = wdef.get("progress_unit")
+                if isinstance(pu, str):
+                    out["progress_unit"] = pu
+                vr = wdef.get("visible_rows")
+                if isinstance(vr, list):
+                    out["visible_rows"] = vr
+
+            # Sous vide: temp/target/time topics
+            if wtype == "sousvide":
+                _ent_t("temp_entity", "temp_topic")
+                _ent_t("target_entity", "target_topic")
+                _ent_t("time_entity", "time_topic")
+
+            # Appliance: time/program topics
+            if wtype == "appliance":
+                _ent_t("time_entity", "time_topic")
+                _ent_t("program_entity", "program_topic")
+
+            # Media player: inject per-attribute statestream topics
+            if wtype == "mediaplayer" and dom and obj:
+                attr_base = f"{base_stream}/{dom}/{obj}/attributes"
+                out["title_topic"]    = f"{attr_base}/media_title"
+                out["artist_topic"]   = f"{attr_base}/media_artist"
+                out["position_topic"] = f"{attr_base}/media_position"
+                out["duration_topic"] = f"{attr_base}/media_duration"
+
+            # Camera: stream_url, scale_mode, overlay_button with topics
+            if wtype == "camera":
+                su = wdef.get("stream_url")
+                if isinstance(su, str) and su.strip():
+                    out["stream_url"] = su.strip()
+                sm = wdef.get("scale_mode")
+                if isinstance(sm, str):
+                    out["scale_mode"] = sm
+                ob = wdef.get("overlay_button")
+                if isinstance(ob, dict):
+                    ob_ent = ob.get("entity_id")
+                    ob_out: Dict[str, Any] = {}
+                    if isinstance(ob_ent, str) and "." in ob_ent:
+                        ob_d, ob_o = ob_ent.split(".", 1)
+                        ob_out["entity_id"] = ob_ent
+                        ob_out["state_topic"] = f"{base_stream}/{ob_d}/{ob_o}/state"
+                        ob_out["command_topic"] = f"{base_cmd}/{ob_ent}"
+                    for k in ("label", "action"):
+                        v = ob.get(k)
+                        if isinstance(v, str):
+                            ob_out[k] = v
+                    if ob_out:
+                        out["overlay"] = ob_out
+
+            # Webpage: stream_url / url
+            if wtype == "webpage":
+                su = wdef.get("stream_url") or wdef.get("url")
+                if isinstance(su, str) and su.strip():
+                    out["stream_url"] = su.strip()
+
+            # Mealie: pass through widget-specific fields
+            if wtype == "mealie":
+                for field in ("mealie_url", "mealie_api_key", "visible_section"):
+                    v = wdef.get(field)
+                    if isinstance(v, str):
+                        out[field] = v
+
+            return out
+
+        for idx, it in enumerate(widgets or []):
+            nw = _normalize_one(it, idx)
+            if nw is not None:
+                norm_widgets.append(nw)
 
         ui["widgets"] = norm_widgets
+
+        # Normalize pages widgets (multi-page profiles: ui.pages[*].widgets)
+        if isinstance(ui.get("pages"), list):
+            normed_pages = []
+            for page in ui["pages"]:
+                if not isinstance(page, dict):
+                    normed_pages.append(page)
+                    continue
+                page_norm = []
+                for pidx, pw in enumerate(list(page.get("widgets") or [])):
+                    nw = _normalize_one(pw, pidx)
+                    if nw is not None:
+                        page_norm.append(nw)
+                pg = dict(page)
+                pg["widgets"] = page_norm
+                normed_pages.append(pg)
+            ui["pages"] = normed_pages
         try:
             _LOGGER.debug("build_config: device=%s normalized_widgets=%d", device_id, len(norm_widgets))
         except Exception:
@@ -949,8 +1127,15 @@ class MqttBridge:
 
     # ---------- mirror ----------
     async def _maybe_start_mirror(self, *, publish_snapshot: bool = True) -> None:
-        # Mirror is always enabled; subscribe if any entities configured
-        wanted = [w.lower() for w in list(self.cfg.get(CONF_MIRROR_ENTITIES, []) or []) if isinstance(w, str) and "." in w]
+        # Compute effective entity list: auto-derive from profiles, or use manual list
+        if self.cfg.get(CONF_MIRROR_AUTO):
+            profiles = dict(self.cfg.get(CONF_PROFILES, {}) or {})
+            wanted = _extract_entities_from_profiles(profiles)
+            _LOGGER.debug("mirror auto-derived %d entities from profiles", len(wanted))
+        else:
+            wanted = [w.lower() for w in list(self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])
+                      if isinstance(w, str) and "." in w]
+        self._mirror_wanted = wanted
 
         if self._mirror_unsub:
             try: self._mirror_unsub()
@@ -958,11 +1143,16 @@ class MqttBridge:
             self._mirror_unsub = None
 
         if not wanted:
-            _LOGGER.debug("mirror enabled but empty entity list")
+            _LOGGER.warning(
+                "ha_mqtt_dash: mirror has no entities to track (auto=%s, manual_count=%d). "
+                "Go to Integration → Configure → 'Mirror entities to MQTT' to configure.",
+                bool(self.cfg.get(CONF_MIRROR_AUTO)),
+                len(self.cfg.get(CONF_MIRROR_ENTITIES, []) or []),
+            )
             return
 
         self._mirror_unsub = async_track_state_change_event(self.hass, wanted, self._on_state_changed)
-        _LOGGER.debug("mirror started for %d entities", len(wanted))
+        _LOGGER.debug("mirror started for %d entities (auto=%s)", len(wanted), bool(self.cfg.get(CONF_MIRROR_AUTO)))
         if publish_snapshot:
             await self.async_publish_snapshot()
 
@@ -1004,12 +1194,11 @@ class MqttBridge:
         self._attr_vals_by_entity[ent_key] = new_attr_map
 
     def _is_mirrored(self, entity_id: str) -> bool:
-        wanted: List[str] = [str(x).lower() for x in (self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])]
-        return entity_id.lower() in wanted
+        return entity_id.lower() in self._mirror_wanted
 
     async def async_publish_snapshot(self) -> None:
         base = FIXED_STATESTREAM_BASE
-        for ent_id in list(self.cfg.get(CONF_MIRROR_ENTITIES, []) or []):
+        for ent_id in list(self._mirror_wanted):
             st = self.hass.states.get(ent_id)
             if not st: continue
             dom, obj = ent_id.split(".", 1)
@@ -1228,7 +1417,7 @@ class MqttBridge:
         parts = topic.split("/")
         key = parts[-1] if parts else ""
         st = self._telemetry.setdefault(device_id, {})
-        # battery (0-100), charging (on/off), orientation (string)
+        # battery (0-100), charging (on/off), orientation (string), keep_awake (on/off)
         if key == "battery":
             try:
                 st["battery"] = int(payload)
@@ -1238,6 +1427,15 @@ class MqttBridge:
             st["charging"] = (payload.strip().lower() in ("on", "true", "1"))
         elif key == "orientation":
             st["orientation"] = payload.strip().lower()
+        elif key == "keep_awake":
+            is_on = payload.strip().lower() in ("on", "true", "1")
+            st["keep_awake"] = is_on
+            # Update storage and notify HA entities without publishing back (avoid loop)
+            try:
+                cur = await self._storage_helper.update_device_settings(device_id, {"keep_awake": is_on})
+                async_dispatcher_send(self.hass, SIGNAL_DEVICE_SETTINGS_UPDATED, device_id, dict(cur))
+            except Exception:
+                _LOGGER.debug("keep_awake telemetry: storage update failed", exc_info=True)
         # expose to HA entities
         self.hass.data.setdefault("ha_mqtt_dash", {})["telemetry"] = self._telemetry
 
@@ -1312,6 +1510,41 @@ class MqttBridge:
             if domain in ("number", "input_number"):
                 await self.hass.services.async_call(domain, "set_value", {"entity_id": entity_id, "value": cmd.get("level")}, blocking=False)
                 return
+        elif action == "set_hvac_mode" and domain == "climate":
+            mode = cmd.get("mode") or cmd.get("hvac_mode")
+            if mode:
+                await self.hass.services.async_call("climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": mode}, blocking=False)
+            return
+        elif action == "set_temperature" and domain == "climate":
+            svc_data: Dict[str, Any] = {"entity_id": entity_id}
+            if "temperature" in cmd:
+                svc_data["temperature"] = cmd["temperature"]
+            if "target_temp_high" in cmd:
+                svc_data["target_temp_high"] = cmd["target_temp_high"]
+            if "target_temp_low" in cmd:
+                svc_data["target_temp_low"] = cmd["target_temp_low"]
+            await self.hass.services.async_call("climate", "set_temperature", svc_data, blocking=False)
+            return
+        elif action == "set_fan_mode" and domain == "climate":
+            fan_mode = cmd.get("fan_mode")
+            if fan_mode:
+                await self.hass.services.async_call("climate", "set_fan_mode", {"entity_id": entity_id, "fan_mode": fan_mode}, blocking=False)
+            return
+        elif action in ("media_play_pause", "media_next_track", "media_previous_track") and domain == "media_player":
+            await self.hass.services.async_call("media_player", action, {"entity_id": entity_id}, blocking=False)
+            return
+        elif action == "media_seek" and domain == "media_player":
+            position = cmd.get("position")
+            if position is not None:
+                try:
+                    await self.hass.services.async_call(
+                        "media_player", "media_seek",
+                        {"entity_id": entity_id, "seek_position": float(position)},
+                        blocking=False,
+                    )
+                except Exception:
+                    _LOGGER.warning("media_seek failed for %s position=%s", entity_id, position)
+            return
 
         # Default mapping for common domains (light/switch/input_boolean)
         if service and domain in ("light", "switch", "input_boolean", "scene", "script"):

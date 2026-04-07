@@ -1,17 +1,21 @@
 {
   "config": {
     "step": {
-      "user": { "title": "iPad MQTT Dashboard", "description": "MQTT base topics" },
-      "add_profile": { "title": "Create Profile", "description": "Create initial profile/grid" },
-      "add_device": { "title": "Add Device", "description": "Bind a device_id to a profile" }
-    }
+      "user": {
+        "title": "iPad MQTT Dashboard",
+        "description": "Enter the device ID to onboard (a short name like 'kitchen_ipad'). A default profile with a clock will be created.",
+        "data": { "device_id": "Device ID" }
+      }
+    },
+    "abort": { "single_instance_allowed": "Only a single instance is allowed." }
   },
   "options": {
     "abort": {
       "no_devices": "No devices are onboarded yet. Open the app so it registers, or add a device in the integration's initial setup."
     },
     "error": {
-      "invalid_json": "Invalid JSON. Please fix the profile and try again."
+      "invalid_json": "Invalid JSON. Please fix the profile and try again.",
+      "overlaps": "Overlapping widgets detected. Fix positions and submit again."
     },
     "step": {
       "init": {
@@ -21,15 +25,38 @@
           "profiles_device": "Edit device profile (JSON)",
           "devices_add": "Add device manually",
           "mirror": "Select entities to mirror to MQTT",
-          "topics": "Edit base topics",
-          "guide": "Quick setup guide"
+          "entity_list": "Entity reference",
+          "api_access": "API Access (Profile Editor)"
         }
       },
-  "profiles_device": { "title": "Device Profile", "description": "Edit JSON for selected device" },
-  "devices_add": { "title": "Add Device", "description": "Create device entry and empty profile" },
-      "mirror": { "title": "Mirror", "description": "Select entities to mirror" },
-      "topics": { "title": "Topics", "description": "Base topics" },
-      "guide": { "title": "Quick Guide", "description": "Connection hints and test publish" }
+      "profiles_device": {
+        "title": "Device Profile",
+        "description": "Edit JSON for selected device.",
+        "data": { "device_id": "Device", "profile_json": "Profile JSON" }
+      },
+      "devices_add": {
+        "title": "Add Device",
+        "description": "Create a device entry and empty profile.",
+        "data": { "device_id": "Device ID" }
+      },
+      "mirror": {
+        "title": "Mirror Entities",
+        "description": "Mirror HA entity states to MQTT statestream topics.",
+        "data": {
+          "mirror_auto": "Auto (derive entity list from profile widgets)",
+          "mirror_entities": "Manual entity list (used when Auto is off)"
+        }
+      },
+      "entity_list": {
+        "title": "Entity Reference",
+        "description": "Current mirror mode: {mirror_mode}\n\nEntities used in profile widgets:\n{profile_entities}\n\nManual mirror list:\n{manual_entities}\n\nAll registered HA entities — click the field below, then Ctrl+A and Ctrl+C to copy:",
+        "data": { "all_entities": "All entities" }
+      },
+      "api_access": {
+        "title": "API Access (Profile Editor)",
+        "description": "Allows the web Profile Editor to push profiles directly to this integration via HTTP.\n\nCurrent status: {status}\n\nEnable to open a 10-minute access window from the time you save. Disabled by default.",
+        "data": { "api_enabled": "Enable API access for 10 minutes" }
+      }
     }
   }
 }

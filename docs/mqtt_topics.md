@@ -1,85 +1,207 @@
 # MQTT namespace and topics
 
-Fixed namespace (no custom bases):
+The entire integration uses a fixed `mqttdash/*` namespace — no custom bases or configurable prefixes.
 
-- Configs (retained): `mqttdash/config/<device_id>/config`
-- Device topics:
-    - Settings (retained): `mqttdash/dev/<device_id>/settings`
-    - Hello (non‑retained): `mqttdash/dev/<device_id>/hello`
-    - Status/LWT (retained): `mqttdash/dev/<device_id>/status` (online/offline)
-    - Notify (non‑retained): `mqttdash/dev/<device_id>/notify`
-    - Request (non‑retained): `mqttdash/dev/<device_id>/request` (e.g., `{ "action": "snapshot" | "onboard" }`)
-- Commands (non‑retained): `mqttdash/cmd/<entity_id>`
-- Mirrored state (retained, built‑in by the integration):
-    - State: `mqttdash/statestream/<domain>/<object>/state`
-    - Attributes: `mqttdash/statestream/<domain>/<object>/attributes[/<key>]`
+## Topic map
 
-The integration auto‑wires widget topics under this namespace. Profiles never include MQTT topics.
+| Topic | Direction | Retained | Description |
+|-------|-----------|----------|-------------|
+| `mqttdash/config/<device_id>/config` | HA → iPad | Yes | Profile JSON |
+| `mqttdash/dev/<device_id>/hello` | iPad → HA | No | Device hello / identify |
+| `mqttdash/dev/<device_id>/status` | iPad (LWT) | Yes | `online` / `offline` presence |
+| `mqttdash/dev/<device_id>/telemetry` | iPad → HA | No | Battery level and device info |
+| `mqttdash/dev/<device_id>/settings` | HA → iPad | Yes | Device settings (brightness, orientation, keep-awake, screensaver) |
+| `mqttdash/dev/<device_id>/notify` | HA → iPad | No | Push notification payload |
+| `mqttdash/dev/<device_id>/request` | iPad → HA | No | App requests (snapshot, onboard) |
+| `mqttdash/cmd/<entity_id>` | iPad → HA | No | Widget action commands |
+| `mqttdash/statestream/<domain>/<object>/state` | HA → iPad | Yes | Entity state mirror |
+| `mqttdash/statestream/<domain>/<object>/attributes/<key>` | HA → iPad | Yes | Entity attribute mirror |
 
-## Parameter reference
+The integration auto-wires widget topics based on entity IDs. Profiles never contain MQTT topic strings.
 
-### Top-level (published to `mqttdash/config/<device_id>/config`):
-- `version`: number — config schema version (currently 1)
-- `device_id`: string — target device ID
-- `device`: object — may include `screen` info (from device hello). Not used for settings.
-- `ui`: object — grid and widgets (see below)
-- `topics`: object — device topics
-    - `settings`: string — `mqttdash/dev/<device_id>/settings` (retained)
-    - `hello`: string — `mqttdash/dev/<device_id>/hello`
-    - `status`: string — `mqttdash/dev/<device_id>/status` (retained LWT online/offline)
+---
 
-### Device hello payload (app → HA on `mqttdash/dev/<id>/hello`):
-- JSON with optional fields:
-    - `guid`: string — stable unique identifier for device instance
-    - `prev_id`: string — previous device_id to support seamless rename/migration
-    - `screen`: object — as provided by the client, persisted and echoed back under `device.screen` in config
+## Payload reference
 
-### Device status (presence):
-- `mqttdash/dev/<id>/status`: retained `online`/`offline` via MQTT LWT
+### Config (HA → iPad)
 
-### Commands (app → HA via integration):
-- Published by the app to `mqttdash/cmd/<entity_id>` with JSON payloads:
-    - `{ "action": "turn_on" }`
-    - `{ "action": "turn_off" }`
-    - `{ "action": "toggle" }`
-    - `{ "action": "press" }` (for `button.*`)
-    - Lights can include `{ "brightness": 0..255 }`
+Published retained to `mqttdash/config/<device_id>/config`. Full JSON profile — see [Profiles and widgets](profiles_and_widgets.md) for the schema.
 
-### Device settings (HA → app):
-- `mqttdash/dev/<id>/settings` (retained) JSON fields (all optional; app applies if present):
-    - `brightness`: number 0..1 (clamped)
-    - `keep_awake`: boolean
-    - `orientation`: `auto` | `portrait` | `landscape`
+Top-level fields published by the integration:
 
-### Mirroring configuration (in integration options):
-- `mirror_entities`: array of `domain.object` strings
-- Behavior:
-    - Retained state at `mqttdash/statestream/<domain>/<object>/state`
-    - Retained attributes at `mqttdash/statestream/<domain>/<object>/attributes/<key>`
-    - Snapshot publishes full states/attributes: auto at HA startup and on demand via service
-    - Dedupe avoids redundant publishes; removed attributes are purged by sending empty retained values
+- `version` — config schema version (currently `1`)
+- `device_id` — target device ID
+- `device` — device settings object (echoed back from store)
+- `ui` — grid, pages/widgets, navbar configuration
+- `topics` — device topic strings injected for the app
 
-## Admin/services (HA → integration):
- - `ha_mqtt_dash.push_config` — republish retained configs for all devices
- - `ha_mqtt_dash.reload_config` — transient reload then republish configs
- - `ha_mqtt_dash.set_device_settings` — send settings to a device (retained)
- - `ha_mqtt_dash.publish_snapshot` — publish snapshot for mirrored entities (retained)
- - `ha_mqtt_dash.set_device_profile` — overwrite a device’s profile JSON in HA Store and republish
- - `ha_mqtt_dash.dump_store` — log/publish Store JSON
- - `ha_mqtt_dash.dump_runtime_cfg` — log/publish merged runtime cfg
- - `ha_mqtt_dash.republish_reload_all` — trigger reload+republish cycle
- - `ha_mqtt_dash.prune_unassigned` — remove unassigned devices and purge retained topics
- - `ha_mqtt_dash.dump_device_config` — build/log a single device’s config; optionally publish to a debug topic
+### Device hello (iPad → HA)
 
-## Notifications (HA → iPad popup)
-- Domain service: `ha_mqtt_dash.notify` with fields: `device_id` (or `ha_device` via device selector), `message` (required), `title` (optional).
-- Per-device services: dynamic `notify.mqttdash_<device_id>` (hyphens become underscores). Fields: `message` (required), `title` (optional).
-Behavior: Publishes a non‑retained JSON payload to `mqttdash/dev/<device_id>/notify`. The iPad shows a popup banner with sound/vibrate.
+Published non-retained to `mqttdash/dev/<device_id>/hello`:
+
+```json
+{
+  "guid": "stable-uuid-per-install",
+  "prev_id": "old-device-id",
+  "screen": { "width": 1024, "height": 768, "scale": 1.0, "orientation": "landscape" }
+}
+```
+
+`guid` is a stable identifier generated at first launch and preserved across renames. `prev_id` triggers device migration when a `device_id` changes.
+
+### Device telemetry (iPad → HA)
+
+Published non-retained to `mqttdash/dev/<device_id>/telemetry`:
+
+```json
+{ "battery": 87, "charging": false }
+```
+
+The integration uses this to update the `sensor.<device_id>_battery` entity.
+
+### Device settings (HA → iPad)
+
+Published retained to `mqttdash/dev/<device_id>/settings`. All fields are optional — app applies whichever are present:
+
+```json
+{
+  "brightness": 0.8,
+  "keep_awake": true,
+  "orientation": "landscape",
+  "screensaverTimeout": 120,
+  "screensaverFontSize": 48
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `brightness` | number 0..1 | Screen brightness |
+| `keep_awake` | boolean | Prevent screen sleep |
+| `orientation` | string | `"auto"` \| `"portrait"` \| `"landscape"` |
+| `screensaverTimeout` | number | Idle seconds before screensaver (0 = disabled) |
+| `screensaverFontSize` | number | Screensaver clock font size in pt (0 = device default) |
+
+### Notification (HA → iPad)
+
+Published non-retained to `mqttdash/dev/<device_id>/notify`:
+
+```json
+{ "title": "Laundry", "message": "Washing machine done" }
+```
+
+`title` is optional. The app shows a banner overlay and dismisses the screensaver if active.
+
+### Commands (iPad → HA)
+
+Published non-retained to `mqttdash/cmd/<entity_id>`:
+
+```json
+{ "action": "turn_on" }
+{ "action": "turn_off" }
+{ "action": "toggle" }
+{ "action": "press" }
+{ "action": "turn_on", "brightness": 128 }
+{ "action": "set_hvac_mode", "hvac_mode": "heat" }
+{ "action": "set_temperature", "temperature": 21.5 }
+{ "action": "media_play_pause" }
+{ "action": "media_next_track" }
+{ "action": "media_previous_track" }
+{ "action": "media_seek", "position": 42.0 }
+```
+
+### App requests (iPad → HA)
+
+Published non-retained to `mqttdash/dev/<device_id>/request`:
+
+```json
+{ "action": "snapshot" }
+{ "action": "onboard", "guid": "stable-uuid" }
+```
+
+`snapshot` requests a full state republish. `onboard` re-admits a previously purged device.
+
+---
+
+## HTTP API endpoints
+
+Both endpoints require:
+- **Local network only** — RFC-1918 / loopback addresses. Requests from public IPs are rejected with HTTP 403 even with a valid token.
+- **Bearer token** — `Authorization: Bearer <long_lived_token>` (the same auth the HA frontend uses)
+- **API Access enabled** — Integration Options → API Access (time-limited unlock; auto-closes after 10 minutes of inactivity)
+
+### `POST /api/ha_mqtt_dash/apply_profile`
+
+Saves a profile for a device and triggers an immediate MQTT republish.
+
+Request:
+```json
+{ "device_id": "my_ipad", "profile": { "ui": { ... } } }
+```
+
+Response:
+```json
+{ "status": "ok", "device_id": "my_ipad" }
+```
+
+Rate limited: 20 requests per 60 seconds per IP. Body size limit: 512 KB.
+
+### `GET /api/ha_mqtt_dash/entities`
+
+Returns a sorted list of all entity IDs known to HA. Used by the profile editor for entity autocomplete.
+
+Response:
+```json
+{ "entities": ["binary_sensor.door", "climate.living_room", "light.bedroom"] }
+```
+
+---
+
+## Services
+
+| Service | Description |
+|---------|-------------|
+| `ha_mqtt_dash.push_config` | Republish retained configs for all devices |
+| `ha_mqtt_dash.reload_config` | Transient reload then republish configs |
+| `ha_mqtt_dash.set_device_settings` | Send settings to a device (retained) |
+| `ha_mqtt_dash.publish_snapshot` | Full state snapshot for all mirrored entities |
+| `ha_mqtt_dash.set_device_profile` | Overwrite a device's profile in HA Store and republish |
+| `ha_mqtt_dash.republish_reload_all` | Debounced reload + republish cycle |
+| `ha_mqtt_dash.prune_unassigned` | Remove unassigned devices and purge retained topics |
+| `ha_mqtt_dash.dump_store` | Debug: log HA Store contents |
+| `ha_mqtt_dash.dump_runtime_cfg` | Debug: log merged runtime config |
+| `ha_mqtt_dash.dump_device_config` | Debug: log a single device's resolved config |
+
+---
+
+## Notify services
+
+In addition to the integration services, each registered device gets a dynamic HA notify service:
+
+```
+notify.mqttdash_<device_id>
+```
+
+Hyphens in `device_id` become underscores. Fields: `message` (required), `title` (optional).
+
+```yaml
+service: notify.mqttdash_kitchen_ipad
+data:
+  title: "Alert"
+  message: "Oven left on"
+```
+
+---
 
 ## Retention policy
-- Retained: device configs, device status/hello reflection, device settings, mirrored entity states and attributes.
-- Non‑retained: device requests (e.g., reload, snapshot) and entity command messages.
 
-## Onboard/offboard
-- Onboard (device → HA): publish `{ "action": "onboard", "guid": "..." }` to `mqttdash/dev/<id>/request` to re‑admit a previously purged device.
-- Offboard (HA → device): when a device is purged, the integration clears retained topics and publishes `{ "action": "offboard" }` transiently to `.../request` and retained to `.../settings`. The app clears its stored Device ID and returns to the welcome screen.
+- **Retained:** device configs, device status, device settings, mirrored entity states and attributes
+- **Non-retained:** device hello, telemetry, notifications, app requests, command messages
+- Removed attributes are purged by publishing an empty retained payload to the attribute topic
+
+---
+
+## Onboard / offboard
+
+**Onboard (device → HA):** Publish `{ "action": "onboard", "guid": "..." }` to `mqttdash/dev/<id>/request` to re-admit a previously purged device.
+
+**Offboard (HA → device):** When a device is deleted in HA, the integration clears all retained topics and publishes `{ "action": "offboard" }` to the device request topic. The app stops MQTT, clears its stored Device ID, and returns to the welcome screen. The stable GUID is preserved so the device can re-onboard if needed.

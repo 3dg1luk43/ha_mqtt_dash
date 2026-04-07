@@ -10,7 +10,8 @@
       "no_devices": "No devices are onboarded yet. Open the app so it registers, or add a device in the integration's initial setup."
     },
     "error": {
-      "invalid_json": "Invalid JSON. Please fix the profile and try again."
+      "invalid_json": "Invalid JSON. Please fix the profile and try again.",
+      "overlaps": "Overlapping widgets detected. Fix positions and submit again."
     },
     "step": {
       "init": {
@@ -19,14 +20,24 @@
         "menu_options": {
           "profiles_device": "Edit device profile (JSON)",
           "devices_add": "Add device manually",
-          "mirror": "Select entities to mirror to MQTT"
+          "mirror": "Select entities to mirror to MQTT",
+          "entity_list": "Entity reference",
+          "api_access": "API Access (Profile Editor)"
         }
       },
-  "profiles_device": { "title": "Device Profile", "description": "Edit JSON for selected device" },
-  "devices_add": { "title": "Add Device", "description": "Create device entry and empty profile" },
-      "mirror": { "title": "Mirror", "description": "Select entities to mirror" },
-      "topics": { "title": "Topics", "description": "Base topics" },
-      "guide": { "title": "Quick Guide", "description": "Connection hints and test publish" }
+      "profiles_device": { "title": "Device Profile", "description": "Edit JSON for selected device", "data": { "device_id": "Device", "profile_json": "Profile JSON" } },
+      "devices_add": { "title": "Add Device", "description": "Create device entry and empty profile", "data": { "device_id": "Device ID" } },
+      "mirror": { "title": "Mirror", "description": "Select entities to mirror", "data": { "mirror_auto": "Auto-derive from profile widgets", "mirror_entities": "Manual entity list" } },
+      "entity_list": {
+        "title": "Entity Reference",
+        "description": "Mirror mode: {mirror_mode}\n\nProfile entities:\n{profile_entities}\n\nManual mirror list:\n{manual_entities}\n\nAll registered HA entities (click in, Ctrl+A, Ctrl+C):",
+        "data": { "all_entities": "All entities" }
+      },
+      "api_access": {
+        "title": "API Access (Profile Editor)",
+        "description": "Allows the web Profile Editor to push profiles directly to this integration via HTTP.\n\nStatus: {status}\n\nEnable to open a 10-minute access window. The window starts at integration load — save then reload the integration to refresh it. Disabled by default.",
+        "data": { "api_enabled": "Enable API access for 10 minutes" }
+      }
     }
   }
 }
