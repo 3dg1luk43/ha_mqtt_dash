@@ -12,6 +12,7 @@ The entire integration uses a fixed `mqttdash/*` namespace — no custom bases o
 | `mqttdash/dev/<device_id>/telemetry` | iPad → HA | No | Battery level and device info |
 | `mqttdash/dev/<device_id>/settings` | HA → iPad | Yes | Device settings (brightness, orientation, keep-awake, screensaver) |
 | `mqttdash/dev/<device_id>/notify` | HA → iPad | No | Push notification payload |
+| `mqttdash/dev/<device_id>/heartbeat` | HA → iPad | Yes | Periodic freshness beat (`{"ts":<unix>,"seq":<n>}`, ~30 s) |
 | `mqttdash/dev/<device_id>/request` | iPad → HA | No | App requests (snapshot, onboard) |
 | `mqttdash/cmd/<entity_id>` | iPad → HA | No | Widget action commands |
 | `mqttdash/statestream/<domain>/<object>/state` | HA → iPad | Yes | Entity state mirror |
@@ -91,6 +92,20 @@ Published non-retained to `mqttdash/dev/<device_id>/notify`:
 
 `title` is optional. The app shows a banner overlay and dismisses the screensaver if active.
 
+### Freshness heartbeat (HA → iPad)
+
+Published **retained** to `mqttdash/dev/<device_id>/heartbeat` roughly every 30 s:
+
+```json
+{ "ts": 1717977600, "seq": 42 }
+```
+
+`ts` is a UTC unix timestamp and `seq` increments each beat. The app tracks the
+time since the last heartbeat (and any other inbound traffic) and, if it has seen at
+least one heartbeat, forces an MQTT reconnect when data goes stale (~90 s). This
+recovers from a backend that is connected but no longer publishing. Older integration
+versions that never publish a heartbeat simply leave the watchdog dormant.
+
 ### Commands (iPad → HA)
 
 Published non-retained to `mqttdash/cmd/<entity_id>`:
@@ -107,6 +122,13 @@ Published non-retained to `mqttdash/cmd/<entity_id>`:
 { "action": "media_next_track" }
 { "action": "media_previous_track" }
 { "action": "media_seek", "position": 42.0 }
+{ "action": "open_cover" }
+{ "action": "close_cover" }
+{ "action": "stop_cover" }
+{ "action": "set_cover_position", "position": 60 }
+{ "action": "open_cover_tilt" }
+{ "action": "close_cover_tilt" }
+{ "action": "set_cover_tilt_position", "position": 30 }
 ```
 
 ### App requests (iPad → HA)

@@ -54,6 +54,11 @@ Default SSH password on most jailbreaks is `alpine`. Respring if prompted.
 2. Enter the MQTT broker host, port (default `1883`), the dedicated MQTT username/password, and the `device_id` you added in HA.
 3. Save. The app subscribes to `mqttdash/config/<device_id>/config`, loads the retained config, and renders the dashboard.
 
+Settings also exposes connection options for awkward brokers: **MQTT 3.1 fallback**
+(use legacy MQTT 3.1 instead of 3.1.1) and **Verbose MQTT log** (detailed wire-level
+diagnostics in View Logs). Leave both off unless a connection won't establish — see
+[Troubleshooting](troubleshooting.md).
+
 ## Profile editor
 
 The drag-and-drop web editor runs in any browser — nothing to install:

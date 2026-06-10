@@ -279,6 +279,47 @@ Commands: `media_play_pause`, `media_next_track`, `media_previous_track`, `media
 
 Entity must be in `mirror_entities`.
 
+**`cover`**
+For `cover.*` entities (blinds, shades, garage doors, RF shades). The controls shown on the tile **adapt to the entity's `supported_features`**, so a simple open/close-only device shows two buttons while a positionable, tilting blind shows the full set:
+
+- **Open (▲) / Close (▼)** — always shown.
+- **Stop (■)** — shown when the cover supports `STOP` (or when `supported_features` is not yet known).
+- **Position slider** — shown when the cover supports `SET_POSITION`; reflects `current_position` (0 = closed, 100 = open) and publishes on release.
+- **Tilt controls** — tilt open/close buttons and/or a tilt slider, shown when the cover advertises the corresponding tilt features.
+
+The center label shows the state (`OPEN`/`CLOSED`/`OPENING`/`CLOSING`) and the current position percentage when available. Set `protected: true` to require a confirmation tap before open/close (recommended for garage doors); the stop button is never gated.
+
+**Configurable controls (`cover_items`).** When omitted, controls are auto-detected from the entity's `supported_features`. To choose exactly which controls appear and in what order, set `cover_items` to an ordered array of any of these tokens:
+
+| Token | Renders |
+|-------|---------|
+| `"open"` | Open button (▲) |
+| `"close"` | Close button (▼) |
+| `"stop"` | Stop button (■) |
+| `"position"` | Position slider (0–100) |
+| `"presets"` | A row of position-preset buttons (see `position_presets`) |
+| `"tilt_open"` | Tilt-open button (drawn slat icon) |
+| `"tilt_close"` | Tilt-close button |
+| `"tilt_slider"` | Tilt position slider |
+
+The **order** of the array is honored: top→bottom in tall tiles, row sequence in wide tiles. Controls are **elastic** — `cover_layout` (`"auto"` \| `"horizontal"` \| `"vertical"`) sets orientation; `"auto"` picks from the tile's aspect ratio. In vertical layout, sliders render as **upright (vertical) sliders** beside a button column so they keep full travel in tall tiles. `position_presets` is an array of percentages (default `[0, 25, 75, 100]`) used when `presets` is included.
+
+```json
+{
+  "type": "cover",
+  "entity_id": "cover.bedroom_blinds",
+  "label": "Bedroom",
+  "protected": false,
+  "cover_items": ["position", "presets", "open", "stop", "close"],
+  "cover_layout": "auto",
+  "position_presets": [0, 25, 75, 100]
+}
+```
+
+> The earlier coarse `cover_controls` array (`"buttons"`/`"slider"`/`"presets"`/`"tilt"`) is still accepted for backward compatibility and is expanded into the equivalent `cover_items` tokens.
+
+Commands published: `open_cover`, `close_cover`, `stop_cover`, `set_cover_position` (with `position` 0–100), and the tilt equivalents `open_cover_tilt`, `close_cover_tilt`, `set_cover_tilt_position`. The integration auto-injects `attr_base`; the app reads `current_position`, `current_tilt_position`, and `supported_features` from it. Entity must be in `mirror_entities` (or use auto-mirror).
+
 **`spacer`**
 Empty placeholder. No entity, no label, no interaction — just an empty grid cell for layout spacing.
 

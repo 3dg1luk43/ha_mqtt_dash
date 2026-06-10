@@ -17,6 +17,7 @@ from datetime import timedelta
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # type: ignore
 from homeassistant.helpers import device_registry as dr  # type: ignore
 from homeassistant.helpers import entity_registry as er  # type: ignore
+from homeassistant.util import dt as dt_util  # type: ignore
 from .const import (
     CONF_DEVICES,
     CONF_PROFILES,
@@ -30,6 +31,10 @@ from .storage import StorageHelper
 
 # Fixed mqttdash namespace (replaces legacy 'ha/*' topics). User configuration of bases removed.
 _LOGGER = logging.getLogger(__name__)
+
+# Cadence of the per-device freshness heartbeat. Clients treat the link as stale
+# after ~3 missed beats; keep this comfortably below that window.
+HEARTBEAT_INTERVAL = timedelta(seconds=30)
 
 def _payload_to_str(msg) -> str:
     """Return payload as text, whether it's bytes, str, or None."""
@@ -256,6 +261,11 @@ class MqttBridge:
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/request", self._on_device_request))
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/hello", self._on_device_hello))
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/telemetry/#", self._on_device_telemetry))
+        # Periodic freshness heartbeat so clients can detect a stuck backend and
+        # auto-reset their connection (every HEARTBEAT_INTERVAL seconds).
+        self._unsubs.append(
+            async_track_time_interval(self.hass, self._publish_heartbeats, HEARTBEAT_INTERVAL)
+        )
         # Initialize HA storage and migrate legacy options before first publish
         try:
             # Suppress options-updated reactions while Store mirrors to options during init
@@ -533,6 +543,33 @@ class MqttBridge:
         await self._do_republish_reload("options_updated")
 
     # ---------- retained config ----------
+    async def _publish_heartbeats(self, now=None) -> None:
+        """Publish a periodic heartbeat per device.
+
+        Clients track the time since the last heartbeat (or any traffic) and
+        reset their MQTT connection if the backend goes silent. The payload is a
+        monotonically increasing UTC timestamp + sequence so a client can also
+        detect a frozen/stale retained value. Retained so a reconnecting client
+        immediately sees the most recent beat.
+        """
+        try:
+            cfg_now: Dict[str, Any] = dict(self.cfg or {})
+            devices: List[Dict[str, Any]] = list(cfg_now.get(CONF_DEVICES, []) or [])
+        except Exception:
+            devices = []
+        if not devices:
+            return
+        self._hb_seq = getattr(self, "_hb_seq", 0) + 1
+        ts = int(now.timestamp()) if now is not None else int(dt_util.utcnow().timestamp())
+        payload = json.dumps({"ts": ts, "seq": self._hb_seq}, separators=(",", ":"))
+        for dev in devices:
+            device_id = (dev.get("device_id") or "").strip()
+            if not device_id:
+                continue
+            await mqtt.async_publish(
+                self.hass, f"{FIXED_DEVICE_BASE}/{device_id}/heartbeat", payload, qos=0, retain=True
+            )
+
     async def async_publish_all_configs(self) -> None:
         # Use latest merged in-memory config (self.cfg) so we include any disk-loaded profiles
         # even before ConfigEntry.options round-trips through HA.
@@ -846,11 +883,12 @@ class MqttBridge:
                 elif dom == "scene": wtype = "scene"
                 elif dom in ("script", "button"): wtype = "button"
                 elif dom == "person": wtype = "person"
+                elif dom == "cover": wtype = "cover"
                 else: wtype = "sensor"
 
             state_topic = f"{base_stream}/{dom}/{obj}/state" if dom and obj else ""
             cmd_topic = None
-            if wtype in ("light", "switch", "button", "scene", "climate", "mediaplayer") and ent and "." in ent:
+            if wtype in ("light", "switch", "button", "scene", "climate", "mediaplayer", "cover") and ent and "." in ent:
                 cmd_topic = f"{base_cmd}/{ent}"
             # Local-only widgets have no MQTT state
             if wtype in _NO_ENTITY_TYPES:
@@ -922,6 +960,38 @@ class MqttBridge:
                 sf = wdef.get("state_formats")
                 if isinstance(sf, dict):
                     out["state_formats"] = sf
+
+            # Cover: attr_base exposes current_position / current_tilt_position /
+            # supported_features so the client can adapt controls to the device.
+            # Pass through the optional control-style fields from the profile.
+            if wtype == "cover" and dom == "cover" and obj:
+                out["attr_base"] = f"{base_stream}/{dom}/{obj}/attributes"
+                ci = wdef.get("cover_items")
+                if isinstance(ci, list):
+                    allowed_ci = {"open", "close", "stop", "position", "presets", "tilt_open", "tilt_close", "tilt_slider"}
+                    sel_i = [c for c in ci if isinstance(c, str) and c in allowed_ci]
+                    if sel_i:
+                        out["cover_items"] = sel_i
+                cc = wdef.get("cover_controls")
+                if isinstance(cc, list):
+                    allowed_cc = {"buttons", "slider", "presets", "tilt"}
+                    sel = [c for c in cc if isinstance(c, str) and c in allowed_cc]
+                    if sel:
+                        out["cover_controls"] = sel
+                cl = wdef.get("cover_layout")
+                if isinstance(cl, str) and cl in ("auto", "horizontal", "vertical"):
+                    out["cover_layout"] = cl
+                pp = wdef.get("position_presets")
+                if isinstance(pp, list):
+                    presets = []
+                    for v in pp:
+                        try:
+                            iv = int(v)
+                        except (TypeError, ValueError):
+                            continue
+                        presets.append(max(0, min(100, iv)))
+                    if presets:
+                        out["position_presets"] = presets
 
             # Weather: attr_base, attrs, attr_units
             if wtype == "weather" and dom == "weather" and obj:
@@ -1544,6 +1614,32 @@ class MqttBridge:
                     )
                 except Exception:
                     _LOGGER.warning("media_seek failed for %s position=%s", entity_id, position)
+            return
+        elif domain == "cover" and action in (
+            "open_cover", "close_cover", "stop_cover", "toggle",
+            "open_cover_tilt", "close_cover_tilt", "stop_cover_tilt",
+        ):
+            await self.hass.services.async_call("cover", action, {"entity_id": entity_id}, blocking=False)
+            return
+        elif domain == "cover" and action == "set_cover_position":
+            position = cmd.get("position")
+            if position is not None:
+                try:
+                    await self.hass.services.async_call(
+                        "cover", "set_cover_position",
+                        {"entity_id": entity_id, "position": int(float(position))}, blocking=False)
+                except Exception:
+                    _LOGGER.warning("set_cover_position failed for %s position=%s", entity_id, position)
+            return
+        elif domain == "cover" and action == "set_cover_tilt_position":
+            position = cmd.get("position")
+            if position is not None:
+                try:
+                    await self.hass.services.async_call(
+                        "cover", "set_cover_tilt_position",
+                        {"entity_id": entity_id, "tilt_position": int(float(position))}, blocking=False)
+                except Exception:
+                    _LOGGER.warning("set_cover_tilt_position failed for %s position=%s", entity_id, position)
             return
 
         # Default mapping for common domains (light/switch/input_boolean)

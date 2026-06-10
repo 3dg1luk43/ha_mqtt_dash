@@ -2,9 +2,23 @@
 
 ## Connectivity and broker setup
 
-- **MQTT version:** the app requires a **3.1.1 TCP listener**. MQTT v5-only and WebSockets-only listeners will not work.
+- **MQTT version:** the app speaks **MQTT 3.1.1** over TCP by default. MQTT v5-only and WebSockets-only listeners will not work. A **MQTT 3.1 fallback** toggle in Settings switches to the legacy 3.1 protocol for brokers/listeners pinned to it.
 - **TLS:** not supported by the legacy iOS client (required for iPad 1/iOS 5.1 compatibility). Keep the broker LAN-only.
-- **Keepalive / backoff:** keepalive 30 s; connect timeout 12 s; exponential backoff with jitter on reconnect.
+- **Keepalive / backoff:** keepalive defaults to 30 s (configurable in Settings); connect timeout 12 s; exponential backoff with jitter on reconnect.
+
+## App stuck on "connecting" / `connect timeout` (no CONNACK)
+
+If the log reaches `sending CONNECT` but never `rx bytes`, the broker is receiving nothing usable from the app. Things to try:
+
+1. **Update the app** — builds from 0.5.1 on fixed a bug where the CONNECT packet could be truncated before it reached the broker (strict brokers such as mosquitto 2.x then waited forever with no CONNACK).
+2. **Enable Settings → Verbose MQTT log** — it logs the CONNECT summary (protocol, client-id, keepalive, whether credentials are present, length) plus a hex preview and byte counts, and a clearer timeout diagnostic.
+3. **Try Settings → MQTT 3.1 fallback** if your listener is pinned to MQTT 3.1.
+4. **Check the broker logs** with `log_type all` and `connection_messages true` — confirm it receives the CONNECT and, if it rejects it, why.
+5. Confirm the dashboard account has read/write on `mqttdash/#` (see CONNACK code 5 below).
+
+## Dashboard stops updating but stays "connected"
+
+The app runs a data-freshness watchdog: it watches the integration's retained heartbeat (`mqttdash/dev/<device_id>/heartbeat`, ~30 s) plus all other inbound traffic, and forces a reconnect if data goes stale (~90 s). If tiles freeze and never recover, confirm the integration is publishing the heartbeat (`mosquitto_sub -v -t 'mqttdash/dev/+/heartbeat'`); a pre-0.5.1 integration won't publish one, so the watchdog stays dormant.
 
 ## Common CONNACK error codes
 

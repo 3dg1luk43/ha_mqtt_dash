@@ -41,9 +41,9 @@ Signed `.deb` packages for all build variants are published under `releases/` in
 
 An optional **MQTTDash Kiosk** MobileSubstrate tweak locks the iPad into the dashboard permanently: auto-launch on boot, home button sleeps instead of showing SpringBoard, wake always returns to the app, Notification Center and banners suppressed. Designed for iOS 5.1.x wall-panel installs. See [iOS deployment guide](docs/ios_deployment.md#8-optional-kiosk-mode) for details.
 
-## Widget types (19)
+## Widget types (20)
 
-`light` · `switch` · `scene` · `button` · `sensor` · `value` · `person` · `label` · `clock` · `weather` · `climate` · `camera` · `printer` · `timer` · `webpage` · `mealie` · `sousvide` · `appliance` · `mediaplayer`
+`light` · `switch` · `scene` · `button` · `sensor` · `value` · `person` · `label` · `clock` · `weather` · `climate` · `camera` · `printer` · `timer` · `webpage` · `mealie` · `sousvide` · `appliance` · `mediaplayer` · `cover`
 
 Full schema reference: [Profiles and widgets](docs/profiles_and_widgets.md)
 
