@@ -12,6 +12,7 @@ The entire integration uses a fixed `mqttdash/*` namespace — no custom bases o
 | `mqttdash/dev/<device_id>/telemetry` | iPad → HA | No | Battery level and device info |
 | `mqttdash/dev/<device_id>/settings` | HA → iPad | Yes | Device settings (brightness, orientation, keep-awake, screensaver) |
 | `mqttdash/dev/<device_id>/notify` | HA → iPad | No | Push notification payload |
+| `mqttdash/dev/<device_id>/heartbeat` | HA → iPad | Yes | Periodic freshness beat (`{"ts":<unix>,"seq":<n>}`, ~30 s) |
 | `mqttdash/dev/<device_id>/request` | iPad → HA | No | App requests (snapshot, onboard) |
 | `mqttdash/cmd/<entity_id>` | iPad → HA | No | Widget action commands |
 | `mqttdash/statestream/<domain>/<object>/state` | HA → iPad | Yes | Entity state mirror |
