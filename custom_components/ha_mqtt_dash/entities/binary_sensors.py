@@ -52,6 +52,8 @@ class OnlineBinarySensor(BinarySensorEntity):
         self._unsub: Optional[Callable[[], None]] = None
         # Fixed topic per device in integration namespace
         self._status_topic = f"mqttdash/dev/{device_id}/status"
+        self._screen: Optional[str] = None
+        self._screen_written: Optional[str] = None
 
     @property
     def device_info(self) -> DeviceInfo:  # type: ignore[override]
@@ -64,6 +66,10 @@ class OnlineBinarySensor(BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return self._is_online
+
+    @property
+    def extra_state_attributes(self):
+        return {"screen": self._screen} if self._screen else {}
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -79,8 +85,10 @@ class OnlineBinarySensor(BinarySensorEntity):
                 payload = "" if raw is None else str(raw)
             payload = payload.strip().lower()
 
-            if payload in ("online", "offline"):
-                online = payload == "online"
+            # "sleeping": screen off but reachable over the app's background link
+            if payload in ("online", "offline", "sleeping"):
+                online = payload != "offline"
+                self._screen = "awake" if payload == "online" else ("asleep" if payload == "sleeping" else None)
             else:
                 online = None
 
@@ -90,8 +98,9 @@ class OnlineBinarySensor(BinarySensorEntity):
                     self.async_write_ha_state()
                 return
 
-            if self._is_online != online:
+            if self._is_online != online or self._screen_written != self._screen:
                 self._is_online = online
+                self._screen_written = self._screen
                 self.async_write_ha_state()
 
         # Subscribe to retained status; we'll immediately get retained value if present

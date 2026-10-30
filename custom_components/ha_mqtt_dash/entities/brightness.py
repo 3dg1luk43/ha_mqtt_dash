@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Any
 from homeassistant.components.number import NumberEntity  # type: ignore
 from homeassistant.helpers.entity import DeviceInfo  # type: ignore
 from homeassistant.helpers.dispatcher import async_dispatcher_connect  # type: ignore

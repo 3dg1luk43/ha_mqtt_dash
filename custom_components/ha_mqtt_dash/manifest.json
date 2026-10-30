@@ -4,7 +4,11 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "mqtt"
+    "frontend",
+    "http",
+    "mqtt",
+    "panel_custom",
+    "websocket_api"
   ],
   "documentation": "https://github.com/3dg1luk43/ha_mqtt_dash",
   "domain": "ha_mqtt_dash",

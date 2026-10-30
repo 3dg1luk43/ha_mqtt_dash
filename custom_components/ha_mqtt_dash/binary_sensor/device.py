@@ -1,5 +1,5 @@
 from __future__ import annotations
-from ..const import DOMAIN, CONF_DEVICES
+from ..const import CONF_DEVICES
 from ..entities.binary_sensors import ChargingBinarySensor, OnlineBinarySensor
 
 

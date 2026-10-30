@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict, List, Set
 import hashlib
 import time
@@ -12,7 +11,6 @@ from homeassistant.config_entries import ConfigEntry  # type: ignore
 from homeassistant.helpers.storage import Store  # type: ignore
 
 from .const import (
-    CONF_DEVICES,
     CONF_PROFILES,
     STORAGE_KEY,
     STORAGE_VERSION,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 import json
 import logging
-import time as _time
 import voluptuous as vol  # type: ignore
 from homeassistant import config_entries  # type: ignore
 from homeassistant.core import callback # type: ignore
@@ -12,8 +11,6 @@ from .const import (
     CONF_DEVICES, CONF_PROFILES,
     CONF_MIRROR_ENTITIES,
     CONF_MIRROR_AUTO,
-    CONF_API_ENABLED,
-    CONF_API_UNTIL_KEY,
 )
 
 STEP_USER = vol.Schema({
@@ -104,11 +101,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_menu(
             step_id="init",
             menu_options=[
+                "editor",
                 "profiles_device",
                 "devices_add",
                 "mirror",
                 "entity_list",
-                "api_access",
+                "battery",
             ],
         )
 
@@ -459,36 +457,58 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
 
     # API Access: time-limited enable for the profile editor push endpoint
-    async def async_step_api_access(self, user_input=None):
-        logging.getLogger(__name__).debug("options_flow:api_access opened")
+    # Link to the hidden dashboard-editor panel (no sidebar entry by design)
+    async def async_step_editor(self, user_input=None):
+        if user_input is not None:
+            return await self.async_step_init()
+        return self.async_show_form(step_id="editor", data_schema=vol.Schema({}),
+                                    description_placeholders={"url": "/mqttdash-editor"})
 
-        api_until = self.hass.data.get(CONF_API_UNTIL_KEY, 0)
-        remaining = max(0, int(api_until - _time.time()))
-        if remaining > 0:
-            status = f"Active — {remaining // 60}m {remaining % 60}s remaining"
-        else:
-            status = "Disabled"
-
+    # Battery care: pick the charger plug + charge window per device. Saved to
+    # the Store (not options) and ends with an abort-style confirmation so it
+    # never rewrites the whole options payload.
+    async def async_step_battery(self, user_input=None):
+        devices = [d.get("device_id") for d in (self._entry.options.get(CONF_DEVICES) or [])
+                   if isinstance(d, dict) and d.get("device_id")]
+        if not devices:
+            return self.async_abort(reason="no_devices")
+        if user_input is None and len(devices) == 1:
+            self._battery_device = devices[0]
+            return await self.async_step_battery_device()
         schema = vol.Schema({
-            vol.Optional(CONF_API_ENABLED, default=False): selector.BooleanSelector(),
+            vol.Required("device_id", default=devices[0]): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=devices)),
         })
-
         if user_input is None:
-            return self.async_show_form(
-                step_id="api_access",
-                data_schema=schema,
-                description_placeholders={"status": status},
-            )
+            return self.async_show_form(step_id="battery", data_schema=schema)
+        self._battery_device = user_input["device_id"]
+        return await self.async_step_battery_device()
 
-        enable = bool(user_input.get(CONF_API_ENABLED, False))
-        self._data[CONF_API_ENABLED] = enable
-        # Update api_until directly so it takes effect immediately, even if
-        # CONF_API_ENABLED was already True (HA won't fire the update listener
-        # when options haven't changed, so we can't rely on it alone).
-        api_until = (_time.time() + 600) if enable else 0
-        self.hass.data[CONF_API_UNTIL_KEY] = api_until
-        logging.getLogger(__name__).debug(
-            "api_access: api_until set to %s",
-            "now+10min" if api_until else "disabled",
-        )
-        return self.async_create_entry(title="", data=self._data)
+    async def async_step_battery_device(self, user_input=None):
+        bridge = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+        if bridge is None:
+            return self.async_abort(reason="not_loaded")
+        dev = getattr(self, "_battery_device", "")
+        cfg = bridge.battery.settings(dev)
+        schema = vol.Schema({
+            vol.Optional("enabled", default=bool(cfg["enabled"])): selector.BooleanSelector(),
+            vol.Optional("charger", description={"suggested_value": cfg["charger"] or None}): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["switch", "light", "input_boolean"])),
+            vol.Optional("start", default=cfg["start"]): selector.NumberSelector(selector.NumberSelectorConfig(
+                min=10, max=90, step=5, unit_of_measurement="%", mode=selector.NumberSelectorMode.SLIDER)),
+            vol.Optional("stop", default=cfg["stop"]): selector.NumberSelector(selector.NumberSelectorConfig(
+                min=30, max=100, step=5, unit_of_measurement="%", mode=selector.NumberSelectorMode.SLIDER)),
+        })
+        if user_input is None:
+            tel = (bridge._telemetry or {}).get(dev, {})
+            return self.async_show_form(step_id="battery_device", data_schema=schema, description_placeholders={
+                "device": dev, "battery": str(tel.get("battery", "?")),
+                "state": bridge.battery.status(dev).get("state", "disabled"),
+            })
+        await bridge.battery.async_update_settings(dev, {
+            "enabled": bool(user_input.get("enabled", False)),
+            "charger": user_input.get("charger") or "",
+            "start": user_input.get("start", cfg["start"]),
+            "stop": user_input.get("stop", cfg["stop"]),
+        })
+        return self.async_abort(reason="battery_saved")

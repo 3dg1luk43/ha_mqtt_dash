@@ -1,0 +1,165 @@
+/* MQTTDash Profile Editor — app styles */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Widget delete button: hidden by default, shown on tile hover */
+.widget-delete-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+div:hover > .widget-delete-btn,
+.widget-delete-btn:focus {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Scrollbar styling for panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ed-scroll-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ed-scroll-thumb) 70%, var(--ed-text));
+}
+
+/* ── HA-style controls (toolbar, menus, palette) ─────────────────────────── */
+.ed-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--ed-btn-radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ed-primary);
+  font: 500 13px/1 var(--ed-font);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, filter 0.15s;
+}
+.ed-btn:hover:not(:disabled) { background: var(--ed-primary-soft); }
+.ed-btn:disabled { color: var(--ed-text-3); cursor: default; }
+.ed-btn--outlined { border-color: color-mix(in srgb, var(--ed-primary) 55%, transparent); }
+.ed-btn--outlined:disabled { border-color: var(--ed-divider); }
+.ed-btn--filled { background: var(--ed-primary); color: var(--ed-on-primary); }
+.ed-btn--filled:hover:not(:disabled) { background: var(--ed-primary); filter: brightness(1.1); }
+.ed-btn--filled:disabled {
+  background: color-mix(in srgb, var(--ed-text) 12%, transparent);
+  color: var(--ed-text-3);
+}
+.ed-btn--ok, .ed-btn--ok:hover:not(:disabled) { background: var(--ed-success); color: #fff; }
+.ed-btn--err, .ed-btn--err:hover:not(:disabled) { background: var(--ed-error); color: #fff; }
+.ed-btn--danger { color: var(--ed-error); }
+.ed-btn--danger:hover:not(:disabled) { background: color-mix(in srgb, var(--ed-error) 14%, transparent); }
+
+.ed-icon-btn {
+  width: 34px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--ed-text-2);
+  font-size: 18px;
+}
+.ed-icon-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ed-text) 10%, transparent); }
+.ed-icon-btn[aria-pressed='true'] { color: var(--ed-primary); background: var(--ed-primary-soft); }
+
+.ed-select {
+  height: 34px;
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: var(--ed-ctl-radius);
+  border: 1px solid var(--ed-divider);
+  background-color: var(--ed-input-bg);
+  color: var(--ed-text);
+  font: 400 13px var(--ed-font);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.ed-select:focus-visible { outline: 2px solid var(--ed-primary); outline-offset: -1px; }
+
+/* Two-button segmented toggle (orientation) */
+.ed-seg {
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 34px;
+  border: 1px solid var(--ed-divider);
+  border-radius: var(--ed-ctl-radius);
+  overflow: hidden;
+  background: var(--ed-input-bg);
+}
+.ed-seg > button {
+  width: 34px;
+  border: none;
+  background: transparent;
+  color: var(--ed-text-2);
+  font-size: 15px;
+  cursor: pointer;
+}
+.ed-seg > button + button { border-left: 1px solid var(--ed-divider); }
+.ed-seg > button:hover { background: color-mix(in srgb, var(--ed-text) 8%, transparent); }
+.ed-seg > button[aria-pressed='true'] { background: var(--ed-primary-soft); color: var(--ed-primary); }
+
+.ed-vsep {
+  width: 1px;
+  height: 24px;
+  flex-shrink: 0;
+  background: var(--ed-divider);
+}
+
+.ed-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 190px;
+  padding: 6px 0;
+  background: var(--ed-surface);
+  border: 1px solid var(--ed-divider);
+  border-radius: 12px;
+  box-shadow: var(--ed-popover-shadow);
+  z-index: 500;
+}
+.ed-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 16px;
+  border: none;
+  background: none;
+  color: var(--ed-text);
+  font: 400 14px var(--ed-font);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ed-menu-item:hover { background: color-mix(in srgb, var(--ed-text) 8%, transparent); }
+.ed-menu-item > span:first-child { width: 18px; text-align: center; color: var(--ed-text-2); }
+.ed-menu-item--danger, .ed-menu-item--danger > span:first-child { color: var(--ed-error); }
+
+/* Widget palette tiles (grid + rail variants) */
+.ed-pal-tile {
+  transition: border-color 0.15s, background 0.15s;
+}
+.ed-pal-tile:hover {
+  border-color: color-mix(in srgb, var(--ed-primary) 60%, transparent) !important;
+  background: var(--ed-primary-soft) !important;
+}
+
+/* Config drawer (narrow layouts) */
+.ed-drawer {
+  transition: transform 0.2s ease, visibility 0.2s;
+}

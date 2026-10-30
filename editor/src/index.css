@@ -1,0 +1,118 @@
+/* Editor chrome theme tokens. The defaults are the standalone (GitHub Pages)
+   light look; inside Home Assistant utils/haTheme.js overrides the base tokens
+   from HA's theme and sets data-ed-theme="ha", which derives the rest below.
+   The canvas content (iPad frame + widget previews) does not use these. */
+:root {
+  --ed-bg: #f0f2f5;
+  --ed-canvas-bg: #e4e7ef;
+  --ed-surface: #ffffff;
+  --ed-surface-2: #f5f5f5;
+  --ed-input-bg: #fafafa;
+  --ed-text: #333333;
+  --ed-text-2: #666666;
+  --ed-text-3: #999999;
+  --ed-primary: #1a237e;
+  --ed-on-primary: #ffffff;
+  --ed-primary-soft: #e8eaf6;
+  --ed-divider: #e0e0e0;
+  --ed-divider-2: #f0f0f0;
+  --ed-border: #dddddd;
+  --ed-radius: 10px;
+  --ed-ctl-radius: 4px;
+  --ed-btn-radius: 5px;
+  --ed-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  --ed-success: #2e7d32;
+  --ed-error: #c62828;
+  --ed-warning: #ff9800;
+  --ed-on-warning: #ffffff;
+  --ed-ok-bg: #e8f5e9;
+  --ed-ok-border: #a5d6a7;
+  --ed-err-bg: #fdecea;
+  --ed-err-border: #ef9a9a;
+  --ed-warn-bg: #fff3e0;
+  --ed-warn-border: #ffb74d;
+  --ed-warn-text: #7a4100;
+  --ed-note-bg: #fff8e1;
+  --ed-note-border: #ffe082;
+  --ed-info-bg: #f0f4ff;
+  --ed-info-border: #e8ecf8;
+  --ed-neutral: #37474f;
+  --ed-on-neutral: #ffffff;
+  --ed-link: #0277bd;
+
+  --ed-overlay: rgba(0, 0, 0, 0.4);
+  --ed-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
+  --ed-popover-shadow: 0 4px 20px rgba(0, 0, 0, 0.13);
+  --ed-scroll-thumb: #d0d0d0;
+  --ed-swatch-empty: #ffffff; /* colour swatch when no colour is set */
+
+  --ed-section-size: 13px;
+  --ed-section-weight: 600;
+  --ed-section-color: #333333;
+  --ed-section-transform: uppercase;
+  --ed-section-spacing: 0.05em;
+}
+
+/* Inside Home Assistant: derived tokens (base ones are set inline by haTheme.js) */
+:root[data-ed-theme='ha'] {
+  --ed-canvas-bg: var(--ed-bg);
+  --ed-divider-2: var(--ed-divider);
+  --ed-border: var(--ed-divider);
+  --ed-ctl-radius: 8px;
+  --ed-btn-radius: 18px;
+  --ed-primary-soft: color-mix(in srgb, var(--ed-primary) 16%, transparent);
+
+  --ed-on-warning: #1c1c1c;
+  --ed-ok-bg: color-mix(in srgb, var(--ed-success) 16%, var(--ed-surface));
+  --ed-ok-border: color-mix(in srgb, var(--ed-success) 45%, var(--ed-surface));
+  --ed-err-bg: color-mix(in srgb, var(--ed-error) 14%, var(--ed-surface));
+  --ed-err-border: color-mix(in srgb, var(--ed-error) 45%, var(--ed-surface));
+  --ed-warn-bg: color-mix(in srgb, var(--ed-warning) 14%, var(--ed-surface));
+  --ed-warn-border: color-mix(in srgb, var(--ed-warning) 45%, var(--ed-surface));
+  --ed-warn-text: var(--ed-text);
+  --ed-note-bg: color-mix(in srgb, var(--ed-warning) 8%, var(--ed-surface));
+  --ed-note-border: color-mix(in srgb, var(--ed-warning) 30%, var(--ed-surface));
+  --ed-info-bg: color-mix(in srgb, var(--ed-primary) 9%, var(--ed-surface));
+  --ed-info-border: color-mix(in srgb, var(--ed-primary) 25%, var(--ed-surface));
+  --ed-neutral: var(--ed-surface-2);
+  --ed-on-neutral: var(--ed-text);
+  --ed-link: var(--ed-primary);
+
+  --ed-overlay: rgba(0, 0, 0, 0.5);
+  --ed-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  --ed-popover-shadow: 0 4px 18px rgba(0, 0, 0, 0.3);
+  --ed-scroll-thumb: color-mix(in srgb, var(--ed-text) 22%, transparent);
+  --ed-swatch-empty: var(--ed-input-bg);
+
+  --ed-section-size: 12px;
+  --ed-section-weight: 500;
+  --ed-section-color: var(--ed-text-2);
+  --ed-section-transform: none;
+  --ed-section-spacing: 0.02em;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--ed-font);
+  font-size: 14px;
+  color: var(--ed-text);
+  background: var(--ed-bg);
+  accent-color: var(--ed-primary);
+}
+
+/* Form controls without explicit inline colors still follow the theme */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+select,
+textarea {
+  font-family: inherit;
+  color: var(--ed-text);
+  background-color: var(--ed-input-bg);
+}
