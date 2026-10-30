@@ -37,14 +37,14 @@ After the integration is set up, each device gets a set of HA entities created a
 
 ## iPad app (.deb)
 
-**Option A — via SSH:**
+**Option A — installer script (recommended):**
 
 ```bash
-scp com.3dg1luk43.mqttdash_0.5.0-1+legacy_iphoneos-arm.deb root@<ipad-ip>:/var/root/
-ssh root@<ipad-ip> "dpkg -i /var/root/com.3dg1luk43.mqttdash_0.5.0-1+legacy_iphoneos-arm.deb"
+./install_ipad.sh root@<ipad-ip>            # detects iOS and installs the matching build
+./install_ipad.sh root@<ipad-ip> --kiosk    # + kiosk tweak (iOS 5.x)
 ```
 
-Default SSH password on most jailbreaks is `alpine`. Respring if prompted.
+It needs OpenSSH on the iPad (Cydia). Default SSH password on most jailbreaks is `alpine` - change it. Manual install also works: copy the matching `.deb` from `releases/` and run `dpkg -i` on the iPad.
 
 **Option B — via Cydia/Sileo repository:** host the `.deb` and generated `Packages` index on any web server and add the source URL on the iPad.
 
@@ -61,26 +61,7 @@ diagnostics in View Logs). Leave both off unless a connection won't establish �
 
 ## Profile editor
 
-The drag-and-drop web editor runs in any browser — nothing to install:
-
-**https://3dg1luk43.github.io/ha_mqtt_dash_profile_editor/**
-
-**Designing a layout:**
-- Drag widget types from the palette onto the iPad canvas.
-- Configure each widget in the right-hand config panel.
-- Switch between pages using the tab bar; add/rename/delete pages as needed.
-- Full undo/redo (Ctrl+Z), auto-saves to localStorage.
-
-**Deploying to a device:**
-
-Requires HA reachable at an HTTPS URL from your browser (e.g., `https://homeassistant.local:8123` with a valid cert, or Nabu Casa). For HTTP-only instances use **Export → Copy JSON** and paste into the integration options instead.
-
-1. Click **⚡ Deploy** in the editor header (or **Export → Send to Home Assistant**).
-2. Enter your HA URL and click **Connect**. HA's OAuth2 login page opens — approve the request.
-3. Enter the **Device ID** and click **▶ Send Profile**. The profile is saved and the device reloads within seconds.
-4. On subsequent iterations, ⚡ Deploy in the header redeploys to the same device with one click.
-
-**Security:** everything in the editor is stored in browser localStorage only — no data leaves your machine. The OAuth2 session auto-closes after 10 minutes of inactivity. The deploy endpoint is local-network only and rejects requests from public IP addresses even with a valid token.
+The integration ships the editor as an admin-only panel at **`/mqttdash-editor`**. It's deliberately *not* in the sidebar. Open it from **Settings → Devices & services → iPad MQTT Dashboard → Configure → Open the dashboard editor**, or from a panel's device page (**Visit**). It uses your HA login: pick the panel in the toolbar, **⤓ Load** its current layout, edit, then **⚡ Deploy**. It follows your HA theme.
 
 ## Per-device entities
 
@@ -95,8 +76,20 @@ Each registered device automatically gets the following HA entities:
 | `number.<device_id>_screensaver_timeout` | Number | Idle timeout in seconds (0 = off) |
 | `number.<device_id>_screensaver_font_size` | Number | Screensaver clock font size (pt) |
 | `button.<device_id>_reload_config` | Button | Force profile reload on the device |
+| `button.<device_id>_wake_screen` | Button | Turn the screen on, even while the panel is asleep |
+| `button.<device_id>_check_battery` | Button | Ask for a fresh battery reading without waking the screen |
+| `binary_sensor.<device_id>_online` | Binary sensor | Reachable; attribute `screen` is `awake` / `asleep` |
+| `switch.<device_id>_battery_care` | Switch | Enable charger control (see below) |
+| `number.<device_id>_charge_start_level` / `_charge_stop_level` | Number | Charge window (%) |
+| `sensor.<device_id>_battery_care_status` | Sensor | `charging` / `resting` / `disabled` / `no_charger` …, with the reason |
 
 All values are two-way: change the entity in HA and the device receives the update over MQTT immediately. Values are retained and re-applied on reconnect.
+
+### Sleeping panels and battery care
+
+While the screen is off, iOS suspends the app. With **Reachable asleep** on (app Settings, default on) the app keeps a tiny background MQTT link (iOS VoIP mode) that only listens for *wake* and *report* requests and reports the battery about every 10 minutes, so HA can wake the screen or read the battery without the panel staying awake.
+
+**Battery care** stops an old iPad from sitting at 100 % on the charger. Put the charger on a smart plug, then open the integration options → **Battery care** and pick the plug, the start level (default 35 %) and the stop level (default 80 %). HA switches the plug on at/below the start level and off at/above the stop level, asks for a reading every 5 min while charging (15 min otherwise), and turns the plug **on** as a fail-safe if the panel stops reporting for 45 min.
 
 ## Per-device notify service
 

@@ -8,15 +8,19 @@ The entire integration uses a fixed `mqttdash/*` namespace — no custom bases o
 |-------|-----------|----------|-------------|
 | `mqttdash/config/<device_id>/config` | HA → iPad | Yes | Profile JSON |
 | `mqttdash/dev/<device_id>/hello` | iPad → HA | No | Device hello / identify |
-| `mqttdash/dev/<device_id>/status` | iPad (LWT) | Yes | `online` / `offline` presence |
+| `mqttdash/dev/<device_id>/status` | iPad (LWT) | Yes | `online` (awake) / `sleeping` (screen off, background link) / `offline` |
 | `mqttdash/dev/<device_id>/telemetry` | iPad → HA | No | Battery level and device info |
 | `mqttdash/dev/<device_id>/settings` | HA → iPad | Yes | Device settings (brightness, orientation, keep-awake, screensaver) |
 | `mqttdash/dev/<device_id>/notify` | HA → iPad | No | Push notification payload |
 | `mqttdash/dev/<device_id>/heartbeat` | HA → iPad | Yes | Periodic freshness beat (`{"ts":<unix>,"seq":<n>}`, ~30 s) |
-| `mqttdash/dev/<device_id>/request` | iPad → HA | No | App requests (snapshot, onboard) |
-| `mqttdash/cmd/<entity_id>` | iPad → HA | No | Widget action commands |
+| `mqttdash/dev/<device_id>/request` | both | No | App requests (snapshot, onboard); HA requests (`wake`, `report`) |
+| `mqttdash/dev/<device_id>/camera` | iPad → HA | No | Camera viewer heartbeat `{"entity_id","active","width","interval"}` (~15 s while shown) |
+| `mqttdash/dev/<device_id>/debug` | → iPad | No | Diagnostics (screenshot / tap / page); only honored with "Verbose MQTT log" on |
+| `mqttdash/cmd/<entity_id>` | iPad → HA | No | Widget action commands (only for entities that are controllable widgets in a profile) |
 | `mqttdash/statestream/<domain>/<object>/state` | HA → iPad | Yes | Entity state mirror |
-| `mqttdash/statestream/<domain>/<object>/attributes/<key>` | HA → iPad | Yes | Entity attribute mirror |
+| `mqttdash/statestream/<domain>/<object>/attributes/<key>` | HA → iPad | Yes | Entity attribute mirror (lists/dicts as JSON, datetimes ISO 8601, `None` as empty) |
+| `mqttdash/art/<entity_id>` | HA → iPad | Yes | Album art / print thumbnail JPEG (≤ 320 px); empty = none |
+| `mqttdash/camera/<entity_id>/frame` | HA → iPad | No | Camera frame JPEG, sent only while a device views the camera |
 
 The integration auto-wires widget topics based on entity IDs. Profiles never contain MQTT topic strings.
 
@@ -142,39 +146,30 @@ Published non-retained to `mqttdash/dev/<device_id>/request`:
 
 `snapshot` requests a full state republish. `onboard` re-admits a previously purged device.
 
+### Panel requests (HA → iPad)
+
+Same topic, from HA:
+
+```json
+{ "action": "wake" }
+{ "action": "report" }
+```
+
+`wake` turns the screen on (via the kiosk tweak). `report` publishes battery / charging telemetry without waking the screen. Both reach a sleeping panel through its background link.
+
 ---
 
-## HTTP API endpoints
+## Editor WebSocket commands
 
-Both endpoints require:
-- **Local network only** — RFC-1918 / loopback addresses. Requests from public IPs are rejected with HTTP 403 even with a valid token.
-- **Bearer token** — `Authorization: Bearer <long_lived_token>` (the same auth the HA frontend uses)
-- **API Access enabled** — Integration Options → API Access (time-limited unlock; auto-closes after 10 minutes of inactivity)
+The dashboard editor panel (`/mqttdash-editor`) talks to Home Assistant over its normal WebSocket connection. All commands require an **admin** user:
 
-### `POST /api/ha_mqtt_dash/apply_profile`
+| Command | Payload | Result |
+|---------|---------|--------|
+| `ha_mqtt_dash/devices` | – | `{"devices": [{"device_id", "has_profile", "battery", "orientation"}]}` |
+| `ha_mqtt_dash/get_profile` | `device_id` | `{"device_id", "profile"}` |
+| `ha_mqtt_dash/apply_profile` | `device_id`, `profile` | saves the profile and republishes it to the panel |
 
-Saves a profile for a device and triggers an immediate MQTT republish.
-
-Request:
-```json
-{ "device_id": "my_ipad", "profile": { "ui": { ... } } }
-```
-
-Response:
-```json
-{ "status": "ok", "device_id": "my_ipad" }
-```
-
-Rate limited: 20 requests per 60 seconds per IP. Body size limit: 512 KB.
-
-### `GET /api/ha_mqtt_dash/entities`
-
-Returns a sorted list of all entity IDs known to HA. Used by the profile editor for entity autocomplete.
-
-Response:
-```json
-{ "entities": ["binary_sensor.door", "climate.living_room", "light.bedroom"] }
-```
+Profiles are limited to 20 pages, 200 widgets per page, 500 widgets in total and 4096 characters per string.
 
 ---
 

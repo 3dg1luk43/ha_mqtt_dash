@@ -77,15 +77,12 @@ This was a known bug in versions before 0.5.0 — the mode segment control used 
 
 Timer state is stored by widget `id`. If the widget has no `id` set, one is auto-generated each time and state is lost on page switch. Add an explicit `id` to the widget definition.
 
-## Profile editor: Deploy button not working
+## Dashboard editor: not opening or Deploy fails
 
-- HA must be reachable at an **HTTPS** URL from your browser. HTTP-only instances are not supported for OAuth2. Use **Export → Copy JSON** and paste into integration options instead.
-- The API access window auto-closes after 10 minutes of inactivity. Re-enable it in Integration Options → API Access if the Deploy button reports an auth error.
-- The deploy endpoint is local-network only. If your browser is outside the LAN (e.g., behind a VPN that routes traffic externally), requests will be rejected.
-
-## Profile editor: Entity autocomplete not working
-
-Autocomplete is fetched from `GET /api/ha_mqtt_dash/entities`. Confirm the API Access option is enabled in the integration and that your HA OAuth2 connection in the editor is active (check the header — it should show "Connected").
+- The editor is admin only. Open it from integration options → **Open the dashboard editor**, or browse to `/mqttdash-editor`.
+- "No panels" in the toolbar: the iPad has not registered yet. Open the app once with the right broker and device ID.
+- A Deploy error message shows in the toolbar (hover for the full text). Check **Settings → System → Logs** for `ha_mqtt_dash`.
+- After updating the integration, reload the browser tab so the new editor files load.
 
 ## Notifications not appearing
 

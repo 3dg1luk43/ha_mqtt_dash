@@ -14,22 +14,27 @@ A Home Assistant custom integration and companion iPad app that turns jailbroken
 
 1. Install the integration via HACS, enter your first `device_id`, and get a starter profile.
 2. Create a dedicated MQTT user in your broker add-on and restrict it to `mqttdash/#`.
-3. Install the iPad app (`.deb`) via SSH or Cydia. Enter broker + `device_id` in Settings.
-4. Open the [visual profile editor](https://3dg1luk43.github.io/ha_mqtt_dash_profile_editor/), design your dashboard, connect to HA, and hit **⚡ Deploy**.
+3. Install the iPad app: `./install_ipad.sh root@<ipad-ip>` (add `--kiosk` for the kiosk tweak). Enter broker + `device_id` in the app's Settings.
+4. In Home Assistant open **Settings → Devices & services → iPad MQTT Dashboard → Configure → Open the dashboard editor**, design your dashboard and hit **⚡ Deploy**.
 
 Detailed steps: [Installation guide](docs/installation.md) · [iOS deployment guide](docs/ios_deployment.md)
 
-## Profile editor
+## Dashboard editor
 
-The drag-and-drop web editor runs in any browser — nothing to install:
-
-**https://3dg1luk43.github.io/ha_mqtt_dash_profile_editor/**
-
-Design your layout visually on an iPad frame, then connect to HA via OAuth2 and deploy directly to the device with one click. Layouts auto-save to browser localStorage. No data is sent to any external server.
+The drag-and-drop editor is built into the integration and opens inside Home Assistant (admin only, not added to the sidebar): integration options → **Open the dashboard editor**, or a panel's device page → **Visit**. Pick the panel, **⤓ Load** its current layout, design on the iPad frame and **⚡ Deploy**. It uses your Home Assistant login and follows your HA theme; nothing leaves your network.
 
 ## Prebuilt app packages
 
-Signed `.deb` packages for all build variants are published under `releases/` in this repository.
+Signed `.deb` packages are published under `releases/` (and attached to each GitHub release). The installer picks the right one for you:
+
+```bash
+git clone https://github.com/3dg1luk43/ha_mqtt_dash && cd ha_mqtt_dash
+./install_ipad.sh root@192.168.1.50            # detects iOS, installs, resprings
+./install_ipad.sh root@192.168.1.50 --kiosk    # + kiosk tweak (iOS 5.x)
+./install_ipad.sh root@192.168.1.50 --dry-run  # only show what it would do
+```
+
+It needs OpenSSH on the iPad (Cydia) and works with the legacy SSH algorithms of iOS 5.
 
 | Variant | Architecture | iOS minimum |
 |---------|-------------|-------------|
@@ -39,7 +44,7 @@ Signed `.deb` packages for all build variants are published under `releases/` in
 
 ## Kiosk mode (optional)
 
-An optional **MQTTDash Kiosk** MobileSubstrate tweak locks the iPad into the dashboard permanently: auto-launch on boot, home button sleeps instead of showing SpringBoard, wake always returns to the app, Notification Center and banners suppressed. Designed for iOS 5.1.x wall-panel installs. See [iOS deployment guide](docs/ios_deployment.md#8-optional-kiosk-mode) for details.
+An optional **MQTTDash Kiosk** MobileSubstrate tweak keeps the iPad on the dashboard: auto-launch on boot, wake skips the lock screen and returns to the app, the dashboard comes back after 2 minutes idle on the home screen, and banners are suppressed. The home button works normally, so iOS Settings stays reachable. Designed for iOS 5.1.x wall-panel installs. See [iOS deployment guide](docs/ios_deployment.md#8-optional-kiosk-mode) for details.
 
 ## Widget types (20)
 
@@ -65,7 +70,8 @@ Full schema reference: [Profiles and widgets](docs/profiles_and_widgets.md)
 - **Profile persistence** — profiles are stored in HA persistent storage and survive restarts without requiring the device to reconnect.
 - **State mirroring** — the integration mirrors selected entities to retained statestream topics. No separate HA Statestream integration needed.
 - **Multi-page support** — profiles can contain a `pages` array; all pages receive live MQTT updates simultaneously.
-- **One-click deploy** — the profile editor's OAuth2 connection pushes layouts directly to devices via a local-network-only API endpoint.
+- **Built-in editor** — design layouts in Home Assistant (admin-only panel, not in the sidebar) and deploy them to a panel in one click.
+- **Wake and battery care** — wake a sleeping panel from HA, read its battery without waking it, and keep an old iPad's battery between two levels with a smart plug.
 
 ## Onboarding flow
 

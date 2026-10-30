@@ -141,7 +141,7 @@ These can also be set via the corresponding HA entities or the `ha_mqtt_dash.set
 ### Widget types
 
 **`light`**
-On/off toggle with optional brightness slider. `attr_topic` for brightness is auto-injected from the entity ID. `dimmable: false` hides the slider.
+Tap toggles. **Drag up/down on the card to set brightness** (left/right on wide cards); the card fills to the brightness level and releasing sends it (drag to 0 turns the light off). Dimmability is detected from the light's `supported_color_modes`, so on/off-only lights just toggle; `dimmable: false` forces on/off only.
 
 **`switch`**
 Full-tile stateful on/off button (not a UISwitch). Supports on/off colors and `protected`.
@@ -174,7 +174,7 @@ For `weather.*` entities. Provide `attrs` (array of attribute key strings) to se
 ```
 
 **`climate`**
-For `climate.*` entities. Shows current and target temperature plus a mode selector segmented control. Optional `modes` limits selectable HVAC modes. Optional `state_formats` provides per-mode visual styling.
+For `climate.*` entities. Big current temperature, a −/+ target stepper (taps update the card instantly and are sent once you pause; values are clamped to the entity's `min_temp`/`max_temp`), an `hvac_action` chip (Heating / Idle) and mode pills. Optional `modes` limits selectable HVAC modes; `state_formats` colors each mode (its `bgColor` tints the card and pill). Optional `temp_step` (e.g. `0.5`); default is the entity's `target_temp_step`, but at least 0.5. On 1-wide cards, tap the chip to cycle modes.
 
 ```json
 {
@@ -190,15 +190,20 @@ For `climate.*` entities. Shows current and target temperature plus a mode selec
 }
 ```
 
-Commands published: `set_hvac_mode`, `set_temperature`. The integration auto-injects `attr_base` and `extra_topics` for current and target temperature.
+Commands published: `set_hvac_mode`, `set_temperature`. The integration auto-injects `attr_base`.
 
 **`camera`**
-Renders an MJPEG stream. `stream_url` is required. A refresh button (↺) is always shown at the top-right to reload the stream. Optional `overlay_button` places an action button at the bottom-right:
+Two sources:
+
+- `camera_entity` (recommended) — any HA `camera.*` entity. HA grabs frames and relays them as JPEGs over MQTT, so it works for cameras the iPad can't play (WebRTC/go2rtc, HTTPS, token-protected). Frames are only produced while a device is actually showing the camera.
+- `stream_url` — a plain-HTTP MJPEG stream or a JPEG snapshot URL, fetched directly by the iPad.
+
+`refresh_interval` sets seconds between frames (default 1 for `camera_entity`). Tap the image for full screen; ↺ reconnects. Streaming stops when the page is hidden, the screensaver is up or the screen is off. Optional `overlay_button` places an action button at the bottom-right:
 
 ```json
 {
   "type": "camera",
-  "stream_url": "http://camera.local/mjpeg",
+  "camera_entity": "camera.k1c_printer_camera",
   "overlay_button": {
     "label": "Door",
     "action": "press",
@@ -207,7 +212,7 @@ Renders an MJPEG stream. `stream_url` is required. A refresh button (↺) is alw
 }
 ```
 
-Optional `scale_mode`: `"fit"` or `"fill"`.
+Optional `scale_mode`: `"fit"` or `"fill"` / `"stretch"`.
 
 **`printer` / `printer3d`**
 Composite widget for 3D printers. Binds to multiple entity IDs — mix and match what you have.
@@ -216,10 +221,16 @@ Composite widget for 3D printers. Binds to multiple entity IDs — mix and match
 |-------|-------------|
 | `nozzle_entity` | Nozzle temperature sensor |
 | `bed_entity` | Bed temperature sensor |
-| `time_entity` | Time remaining (numeric minutes → displayed as HH:MM) |
+| `time_entity` | Time remaining (unit-aware: h / min / s, `H:MM:SS`, or an end timestamp) |
 | `progress_entity` | Progress percentage sensor |
-| `status_entity` | Status text sensor |
+| `status_entity` | Status text sensor (its `file` attribute is shown as the job name) |
+| `nozzle_target_entity` / `bed_target_entity` | Target temperatures, shown as `224/225°` |
+| `layer_entity` / `total_layers_entity` | Current / total layer |
+| `preview_entity` | `image.*` entity with the print thumbnail (relayed by HA) |
 | `progress_unit` | Unit string (e.g., `"%"`) |
+| `visible_rows` | Subset of `nozzle`, `bed`, `time`, `progress`, `status`, `preview`, `layer` |
+
+Shows status chip, big progress, time left + ETA, and a stats row.
 
 **`timer`**
 Local countdown timer — no entity or MQTT required. State persists across page switches.
@@ -227,9 +238,10 @@ Local countdown timer — no entity or MQTT required. State persists across page
 | Field | Default | Description |
 |-------|---------|-------------|
 | `default_seconds` | 300 | Starting duration |
-| `configurable` | true | `false` hides +/- buttons (repeat-only mode) |
+| `configurable` | true | `false` = fixed duration: long-press resets instead of opening the picker |
+| `presets` | 1–60 min | Quick-pick durations (seconds) shown in the picker |
 
-Tap the time display to start/pause. Long-press to reset. +/- buttons adjust duration with accelerating repeat. When finished: 5 red flashes + vibration + alert sound.
+Tap to start / pause / stop the alarm. **Long-press opens the time picker**: preset chips, recent durations, ±10 s / ±1 min, **Start**, and **Save as default**, which remembers the duration for that timer on the device. A paused timer shows ↺ to reset. Timers keep running across config reloads and app restarts, keep the screen awake while active, and bring their page to the front when the alarm rings.
 
 **`webpage`**
 Embeds any local URL in the tile. Set `stream_url` to the target URL. Uses WKWebView on iOS 8+ with automatic fallback to UIWebView on older iOS.
@@ -252,26 +264,30 @@ Sous vide cooker status tile. Dims when idle/off.
 | `entity_id` | Status sensor (`cooking` / `idle` / `off`) |
 | `temp_entity` | Current temperature sensor |
 | `target_entity` | Target temperature sensor |
-| `time_entity` | Time remaining (numeric minutes → HH:MM) |
+| `time_entity` | Time remaining (unit-aware) |
 | `unit` | Temperature unit (default `°C`) |
 
 All entities must be in `mirror_entities`.
 
 **`appliance`**
-Generic appliance status. Dims when off; program label shows "OFF".
+Washer / dishwasher / any appliance (works great with WashData). Shows a state chip (Running, Paused, Finished, Anti wrinkle…), time remaining, program · phase, "Done ~21:07", and a progress bar.
 
 | Field | Description |
 |-------|-------------|
-| `entity_id` | On/off switch or binary sensor |
+| `entity_id` | State sensor or on/off binary sensor |
 | `program_entity` | Current program name sensor |
-| `time_entity` | Time remaining (numeric minutes → HH:MM) |
+| `time_entity` | Time remaining (unit-aware) |
+| `progress_entity` | 0–100 % sensor (optional) |
+| `phase_entity` | Current phase / sub-state (optional) |
+
+If `progress_entity` / `phase_entity` are omitted and `time_entity` is `sensor.<x>_time_remaining`, HA uses `sensor.<x>_progress` / `sensor.<x>_current_phase` when they exist.
 
 All entities must be in `mirror_entities`.
 
 **`mediaplayer`**
 Media player with transport controls and progress bar. Point at any `media_player.*` entity — the integration auto-injects all required MQTT topics.
 
-Displays: track title (2 lines), artist, ⏮ previous / ▶⏸ play-pause / ⏭ next, seekable progress bar with elapsed/total time.
+Displays: **album art** (fetched by HA and relayed over MQTT; `show_art: false` disables it), track title, artist, source, ⏮ / ▶⏸ / ⏭, and a seekable progress bar with elapsed/total time.
 
 State `playing` shows pause icon; `paused`/`idle` shows play; `off`/`unavailable`/`unknown` dims the tile.
 

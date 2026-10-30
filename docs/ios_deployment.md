@@ -46,14 +46,14 @@ This guide covers installing the prebuilt iPad app and the companion HA integrat
 
 Download from the `releases/` folder in this repository.
 
-### Option A — Install via SSH
+### Option A — Installer script (recommended)
 
 ```bash
-scp com.3dg1luk43.mqttdash_0.5.0-1+legacy_iphoneos-arm.deb root@<ipad-ip>:/var/root/
-ssh root@<ipad-ip> "dpkg -i /var/root/com.3dg1luk43.mqttdash_0.5.0-1+legacy_iphoneos-arm.deb"
+./install_ipad.sh root@<ipad-ip>            # detects iOS and installs the matching build
+./install_ipad.sh root@<ipad-ip> --kiosk    # + kiosk tweak (iOS 5.x)
 ```
 
-Default SSH password on most jailbreaks is `alpine`. Respring the device after install if prompted.
+It needs OpenSSH on the iPad (Cydia). Default SSH password on most jailbreaks is `alpine` - change it. Manual install also works: copy the matching `.deb` from `releases/` and run `dpkg -i` on the iPad.
 
 ### Option B — Cydia/Sileo repository
 
@@ -66,29 +66,16 @@ Host the `.deb` and a generated `Packages` index on any web server, then add the
 3. Enter: broker host, port (default `1883`), MQTT username/password, and the `device_id` added in HA.
 4. Save and connect. The app subscribes to its config topic, loads the retained profile, and renders the dashboard.
 
-## 4. Design a dashboard with the profile editor
+## 4. Design a dashboard
 
-Open the visual editor in any browser:
+In Home Assistant open **Settings → Devices & services → iPad MQTT Dashboard → Configure → Open the dashboard editor** (or the device page → **Visit**). The editor opens inside Home Assistant (admin only, not in the sidebar):
 
-**https://3dg1luk43.github.io/ha_mqtt_dash_profile_editor/**
-
-- Drag widget types from the left palette onto the iPad canvas.
-- Configure widgets in the right-hand config panel.
+- Pick the panel in the toolbar; **⤓ Load** brings in its current layout.
+- Drag widget types from the palette onto the iPad canvas and configure them in the settings panel.
 - Add pages, rename them, and set per-page grid overrides via the tab bar.
-- Design is auto-saved to browser localStorage. Export to JSON at any point.
+- **⚡ Deploy** saves the profile and the panel reloads within seconds.
 
-**Deploy directly to the device (requires HA at an HTTPS URL):**
-
-1. Click **⚡ Deploy** in the editor header.
-2. Enter your HA URL (e.g., `https://homeassistant.local:8123`) and click **Connect**.
-3. Approve the OAuth2 request in HA. You'll be redirected back to the editor.
-4. Enter the **Device ID** and click **▶ Send Profile**. The dashboard reloads within seconds.
-
-Subsequent deploys: click ⚡ Deploy again — it redeploys to the same device in one click.
-
-**If your HA is HTTP-only:** use **Export → Copy JSON** and paste the JSON into Integration Options → Edit device profile.
-
-**Security:** the editor stores everything in browser localStorage only. No data is sent to any external server. The OAuth2 API session auto-closes after 10 minutes of inactivity. The deploy endpoint accepts connections from local-network addresses only.
+It uses your Home Assistant login; nothing leaves your network.
 
 ## 5. Per-device HA entities
 
@@ -158,14 +145,11 @@ The result: the iPad behaves like a dedicated appliance. Boot → dashboard. Sle
 
 ### Installation
 
-**Via SSH:**
-
 ```bash
-scp com.3dg1luk43.mqttdash-kiosk_1.0.0-34_iphoneos-arm.deb root@<ipad-ip>:/var/root/
-ssh root@<ipad-ip> "dpkg -i /var/root/com.3dg1luk43.mqttdash-kiosk_1.0.0-34_iphoneos-arm.deb"
+./install_ipad.sh root@<ipad-ip> --kiosk
 ```
 
-After install, respring or reboot. MQTTDash will launch automatically.
+The installer adds the tweak next to the app and resprings; MQTTDash then launches automatically. The home button works normally (iOS Settings stays reachable) and the dashboard returns after 2 minutes idle on the home screen. `ssh root@<ipad-ip> mqttdash-kiosk wake` wakes the screen remotely.
 
 ### Uninstalling
 
