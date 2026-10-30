@@ -1,1 +1,25 @@
+# What is committed: the integration (incl. the built editor bundle), the editor
+# source, the iPad packages in releases/, tools, tests and docs.
+
+# Python / Node / editors
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.vscode/
+*.code-workspace
+.DS_Store
+*.log
+
+# Editor build output (the HA bundle is copied into custom_components/ha_mqtt_dash/editor)
+editor/dist/
+editor/dist-ha/
+
+# Local only: deploy settings, backups of the production copy, test profiles
+tools/deploy.env
+backups/
 ha_mqtt_dash/test_profile.json
+CHANGELOG.md.tmp
+.claude/settings.local.json
