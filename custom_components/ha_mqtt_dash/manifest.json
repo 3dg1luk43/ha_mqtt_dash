@@ -1,4 +1,6 @@
 {
+  "domain": "ha_mqtt_dash",
+  "name": "iPad MQTT Dashboard",
   "codeowners": [
     "@3dg1luk43"
   ],
@@ -11,14 +13,12 @@
     "websocket_api"
   ],
   "documentation": "https://github.com/3dg1luk43/ha_mqtt_dash",
-  "domain": "ha_mqtt_dash",
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/3dg1luk43/ha_mqtt_dash/issues",
   "loggers": [
     "ha_mqtt_dash"
   ],
-  "name": "iPad MQTT Dashboard",
   "requirements": [],
   "version": "0.6.0"
 }

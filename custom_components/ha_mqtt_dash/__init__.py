@@ -15,6 +15,9 @@ from .editor_panel import async_setup_editor, async_remove_editor_panel, PANEL_U
 
 _LOGGER = logging.getLogger(__name__)
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     _LOGGER.debug("ha_mqtt_dash: async_setup called")
     return True
