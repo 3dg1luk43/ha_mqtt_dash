@@ -30,9 +30,8 @@ This guide covers installing the prebuilt iPad app and the companion HA integrat
 
 ### Add the integration
 
-1. Go to Settings → Devices & Services → **Add Integration** → search "iPad MQTT Dashboard".
-2. Enter the first `device_id` (e.g., `kitchen-ipad`). A starter profile is created automatically.
-3. The integration publishes a retained config to `mqttdash/config/<device_id>/config` and creates per-device HA entities.
+1. Go to Settings → Devices & services → **Add integration** → "iPad MQTT Dashboard". Setup asks nothing.
+2. Panels register themselves when the app connects with a panel name (next section) and appear as devices with their entities.
 
 ## 2. Install the iPad app
 
@@ -63,63 +62,35 @@ Host the `.deb` and a generated `Packages` index on any web server, then add the
 
 1. Start **MQTT Dash** on the iPad.
 2. Long-press the screen to open the menu and tap **Settings**.
-3. Enter: broker host, port (default `1883`), MQTT username/password, and the `device_id` added in HA.
-4. Save and connect. The app subscribes to its config topic, loads the retained profile, and renders the dashboard.
+3. Enter: broker host, port (default `1883`), MQTT username/password, and a panel name (`device_id`, for example `kitchen`).
+4. Save and connect. The panel registers in Home Assistant and shows its layout (a "no layout yet" note until you deploy one).
 
 ## 4. Design a dashboard
 
-In Home Assistant open **Settings → Devices & services → iPad MQTT Dashboard → Configure → Open the dashboard editor** (or the device page → **Visit**). The editor opens inside Home Assistant (admin only, not in the sidebar):
+In Home Assistant open **Settings → Devices & services → iPad MQTT Dashboard → Configure → Open the dashboard editor** (or the device page → **Visit**). The editor opens inside Home Assistant (admin only; a sidebar entry can be switched on there):
 
-- Pick the panel in the toolbar; **⤓ Load** brings in its current layout.
-- Drag widget types from the palette onto the iPad canvas and configure them in the settings panel.
-- Add pages, rename them, and set per-page grid overrides via the tab bar.
-- **⚡ Deploy** saves the profile and the panel reloads within seconds.
+- Pick the panel in the toolbar; **Load** brings in its current layout.
+- Search for an entity on the left and drag it onto the screen: the card type follows the entity. Or pick a card type from the list.
+- Click a card to change it on the right; click empty space for the grid and navigation bar. Pages are the tabs in the screen's navigation bar.
+- **Deploy** sends the layout and the panel redraws within seconds. A dot on Deploy means unsaved changes.
 
 It uses your Home Assistant login; nothing leaves your network.
 
-## 5. Per-device HA entities
+## 5. Per-panel entities
 
-Each device automatically gets these entities, grouped under the device in the HA device registry:
+Each panel is a device in Home Assistant with battery, charging, online, last contact, keep awake, brightness, screensaver, orientation, reload, wake screen, check battery, battery care and a notify entity. The full list is in [Installation](installation.md#per-panel-entities).
 
-| Entity | Type | Description |
-|--------|------|-------------|
-| `sensor.<device_id>_battery` | Sensor | Battery % from device telemetry |
-| `switch.<device_id>_keep_awake` | Switch | Prevent device from sleeping |
-| `number.<device_id>_brightness` | Number | Screen brightness (0.0–1.0) |
-| `select.<device_id>_orientation` | Select | `auto` / `portrait` / `landscape` |
-| `number.<device_id>_screensaver_timeout` | Number | Idle timeout in seconds (0 = off) |
-| `number.<device_id>_screensaver_font_size` | Number | Screensaver clock font size (pt) |
-| `button.<device_id>_reload_config` | Button | Force profile reload on device |
+## 6. Managing panels
 
-All are two-way: changing a HA entity pushes the update to the device over MQTT immediately. Values are retained and re-applied on reconnect.
+**Layout:** design it in the dashboard editor and press Deploy.
 
-Each device also gets a notify service for use in automations:
+**Rename:** change the panel name in the app's Settings. The app sends its stable hardware ID with every hello; Home Assistant moves the device, layout and settings and clears the old retained topics.
 
-```yaml
-service: notify.mqttdash_kitchen_ipad
-data:
-  title: "Laundry"
-  message: "Washing machine done"
-```
+**Remove:** delete the device in Home Assistant. Retained topics are cleared and the app returns to its welcome screen.
 
-## 6. Managing devices
+## 7. Actions
 
-**Edit profile:** Integration Options → Edit device profile (JSON), or use the profile editor + Deploy.
-
-**Rename device:** Change the `device_id` in HA Options. The app sends its stable GUID in each hello; the integration migrates the device record and purges old retained topics automatically.
-
-**Remove device:** Delete the device in HA. The integration purges all retained topics and sends an offboard command. The app clears its stored Device ID and returns to the welcome screen.
-
-## 7. Useful services
-
-| Service | Description |
-|---------|-------------|
-| `ha_mqtt_dash.push_config` | Republish retained configs for all devices |
-| `ha_mqtt_dash.reload_config` | Trigger reload then republish all configs |
-| `ha_mqtt_dash.set_device_settings` | Push settings to a specific device (retained) |
-| `ha_mqtt_dash.publish_snapshot` | Publish full state snapshot for all mirrored entities |
-| `ha_mqtt_dash.set_device_profile` | Overwrite a device's profile and republish |
-| `ha_mqtt_dash.dump_device_config` | Log a device's resolved config for debugging |
+`ha_mqtt_dash.reload` and `ha_mqtt_dash.set_device_profile` (notifications: `notify.send_message` on the panel's notify entity); see [Installation](installation.md#actions). For debugging use **Download diagnostics** on the panel's device page.
 
 ## 8. Optional: Kiosk mode
 
@@ -149,7 +120,7 @@ The result: the iPad behaves like a dedicated appliance. Boot → dashboard. Sle
 ./install_ipad.sh root@<ipad-ip> --kiosk
 ```
 
-The installer adds the tweak next to the app and resprings; MQTTDash then launches automatically. The home button works normally (iOS Settings stays reachable) and the dashboard returns after 2 minutes idle on the home screen. `ssh root@<ipad-ip> mqttdash-kiosk wake` wakes the screen remotely.
+The installer adds the tweak next to the app and resprings; MQTTDash then launches automatically. The home button works normally (iOS Settings stays reachable) and the dashboard returns after 2 minutes idle on the home screen. `ssh root@<ipad-ip> mqttdash-kiosk wake` wakes the screen remotely, `mqttdash-kiosk sleep` locks it. While the panel is locked the lock clicks and the charging chime are muted, so battery-care checks stay silent.
 
 ### Uninstalling
 
@@ -185,7 +156,7 @@ Isolates dashboard access and lets you restrict the account to `mqttdash/#`. The
 No. Old iOS versions (especially iOS 5.1 on iPad 1) do not support modern TLS cipher suites, and the embedded MQTT client uses plain TCP. Keep the broker on a trusted LAN segment.
 
 **How do I keep the screen awake?**
-Toggle the `switch.<device_id>_keep_awake` entity in HA, or use `ha_mqtt_dash.set_device_settings`. The setting is retained and re-applied on every reconnect.
+Turn on the panel's **Keep awake** switch in Home Assistant. It is re-applied every time the panel reconnects.
 
 **What does the screensaver do?**
 After the configured idle timeout with no touches, the screen dims and shows a large clock. Any touch dismisses it. The screensaver is also dismissed automatically when a notification arrives or a local timer finishes.

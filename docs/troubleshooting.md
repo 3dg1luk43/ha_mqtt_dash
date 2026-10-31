@@ -39,29 +39,29 @@ The app runs a data-freshness watchdog: it watches the integration's retained he
 
 ## Config not loading
 
-1. Confirm the device_id in the app Settings matches what was added in HA.
-2. Check HA logs for `ha_mqtt_dash` — look for errors on startup or on profile publish.
-3. Run `ha_mqtt_dash.push_config` from HA Developer Tools → Services to force republish all retained configs.
-4. Use `mosquitto_sub -v -t 'mqttdash/#'` on any LAN host to verify the config topic is being published.
+1. The panel name in the app's Settings is the device in Home Assistant; a panel without a deployed layout shows a "no layout yet" note.
+2. Check HA logs for `ha_mqtt_dash`.
+3. Press the panel's **Reload** button, or run `ha_mqtt_dash.reload`, to send every layout again.
+4. **Download diagnostics** on the panel's device page shows the exact config the panel receives.
+5. `mosquitto_sub -v -t 'mqttdash/config/#'` on any LAN host shows what is published.
 
 ## Stale or wrong widget state after reconnect
 
-The app requests a full state snapshot on reconnect. If tiles still show stale data, call `ha_mqtt_dash.publish_snapshot` manually to republish all mirrored entity states.
+The app requests a full state snapshot on reconnect. If tiles still show stale data, press the panel's **Reload** button.
 
 ## Per-device entities not appearing
 
-Entities are created when the integration first processes a device hello. Make sure the app has connected at least once after the integration was installed. If entities are still missing, restart HA and reconnect the device.
+A panel appears in Home Assistant when the app first connects (its hello). Make sure the app has connected at least once with the right broker and a panel name. A panel you deleted in Home Assistant stays ignored until the app re-onboards (Settings → save).
 
 ## Screensaver
 
 - The screensaver activates after the idle timeout with no touches. Default is disabled (0 seconds).
-- Configure timeout via the `number.<device_id>_screensaver_timeout` entity in HA, or via the `device.screensaverTimeout` field in the profile JSON.
+- Set the timeout with the panel's **Screensaver** number in Home Assistant (seconds, 0 = off).
 - Any touch dismisses it. Notifications from HA and local timer completions also dismiss it.
-- If the screensaver font size looks wrong, adjust `number.<device_id>_screensaver_font_size` (points; 0 = device default).
 
 ## Screen not staying awake
 
-Toggle the `switch.<device_id>_keep_awake` entity in HA. The setting is retained and re-applied on every reconnect. Alternatively use `ha_mqtt_dash.set_device_settings` with `{ "keep_awake": true }`.
+Turn on the panel's **Keep awake** switch in Home Assistant. It is re-applied every time the panel reconnects.
 
 ## Climate widget colors not showing
 
@@ -86,7 +86,7 @@ Timer state is stored by widget `id`. If the widget has no `id` set, one is auto
 
 ## Notifications not appearing
 
-- Confirm the per-device notify service name: `notify.mqttdash_<device_id>` with hyphens replaced by underscores.
+- Send to the panel's notify entity (`notify.send_message` with `entity_id: notify.<panel>`) The older `notify.mqttdash_<device_id>` and `ha_mqtt_dash.notify` actions no longer exist.
 - Check the HA logs for the notify call.
 - Verify with `mosquitto_sub -t 'mqttdash/dev/<device_id>/notify'` that the payload is being published.
 - The notification topic is non-retained — the app must be connected when it is published.
@@ -95,20 +95,15 @@ Timer state is stored by widget `id`. If the widget has no `id` set, one is auto
 
 1. Broker has a TCP 3.1.1 listener on your LAN.
 2. Dashboard MQTT account is restricted to `mqttdash/#`.
-3. Integration is installed via HACS and restarted.
-4. `device_id` in the app Settings exactly matches what was entered in the integration.
-5. App has connected at least once so the integration can process the hello and create entities.
+3. Integration is installed via HACS and added (setup asks nothing).
+4. The app has a panel name in Settings and has connected at least once, so the panel registered.
 
 ## Add / rename / remove a device
 
-- **Add:** enter a new device_id in HA Options. On the iPad app, set the same device_id in Settings and reconnect.
-- **Rename:** change the device_id in HA Options. The app sends its stable GUID in each hello; the integration migrates the record automatically.
-- **Remove:** delete the device in HA. The integration purges retained topics and offboards the app. To re-admit, the app sends `{ "action": "onboard" }` via the request topic.
+- **Add:** set a panel name in the app's Settings and connect; the panel registers itself.
+- **Rename:** change the panel name in the app's Settings. The app sends its stable hardware ID in each hello, so Home Assistant moves the device, layout and settings automatically.
+- **Remove:** delete the device in Home Assistant. Retained topics are cleared and the app is offboarded. To re-admit it, save the app's Settings again (it sends `{ "action": "onboard" }`).
 
-## Useful debug services
+## Debugging
 
-| Service | What it logs |
-|---------|-------------|
-| `ha_mqtt_dash.dump_store` | Full HA Store contents (profiles, settings, purged list) |
-| `ha_mqtt_dash.dump_runtime_cfg` | Merged runtime config for all devices |
-| `ha_mqtt_dash.dump_device_config` | Resolved config for a single device (what gets published) |
+Use **Download diagnostics** on the integration or on a panel's device page (Settings → Devices & services). It contains the panels, their layouts, the config each panel receives, settings, telemetry, battery care and last contact, with API keys, passwords, tokens and URL credentials removed.

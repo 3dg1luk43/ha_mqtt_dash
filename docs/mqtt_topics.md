@@ -66,25 +66,23 @@ The integration uses this to update the `sensor.<device_id>_battery` entity.
 
 ### Device settings (HA → iPad)
 
-Published retained to `mqttdash/dev/<device_id>/settings`. All fields are optional — app applies whichever are present:
+Published retained to `mqttdash/dev/<device_id>/settings` whenever one of the panel's setting entities changes, always with all of them (so a reconnecting panel gets the full set). The app applies whichever fields are present:
 
 ```json
 {
   "brightness": 0.8,
   "keep_awake": true,
   "orientation": "landscape",
-  "screensaverTimeout": 120,
-  "screensaverFontSize": 48
+  "screensaver_timeout": 120
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `brightness` | number 0..1 | Screen brightness |
+| `brightness` | number 0.05..1 | Screen brightness (the HA entity shows 5–100 %) |
 | `keep_awake` | boolean | Prevent screen sleep |
 | `orientation` | string | `"auto"` \| `"portrait"` \| `"landscape"` |
-| `screensaverTimeout` | number | Idle seconds before screensaver (0 = disabled) |
-| `screensaverFontSize` | number | Screensaver clock font size in pt (0 = device default) |
+| `screensaver_timeout` | number | Seconds without a touch before the clock screensaver; 0 = off |
 
 ### Notification (HA → iPad)
 
@@ -173,39 +171,15 @@ Profiles are limited to 20 pages, 200 widgets per page, 500 widgets in total and
 
 ---
 
-## Services
+## Actions
 
-| Service | Description |
-|---------|-------------|
-| `ha_mqtt_dash.push_config` | Republish retained configs for all devices |
-| `ha_mqtt_dash.reload_config` | Transient reload then republish configs |
-| `ha_mqtt_dash.set_device_settings` | Send settings to a device (retained) |
-| `ha_mqtt_dash.publish_snapshot` | Full state snapshot for all mirrored entities |
-| `ha_mqtt_dash.set_device_profile` | Overwrite a device's profile in HA Store and republish |
-| `ha_mqtt_dash.republish_reload_all` | Debounced reload + republish cycle |
-| `ha_mqtt_dash.prune_unassigned` | Remove unassigned devices and purge retained topics |
-| `ha_mqtt_dash.dump_store` | Debug: log HA Store contents |
-| `ha_mqtt_dash.dump_runtime_cfg` | Debug: log merged runtime config |
-| `ha_mqtt_dash.dump_device_config` | Debug: log a single device's resolved config |
+| Action | Description |
+|--------|-------------|
+| `ha_mqtt_dash.reload` | Publish every panel's config again and make the panels reload it |
+| `ha_mqtt_dash.set_device_profile` | Replace a panel's profile in the HA Store and republish it |
+| `notify.send_message` on `notify.<panel>` | Publish `{"message", "title"?}` to `mqttdash/dev/<device_id>/notify` |
 
----
-
-## Notify services
-
-In addition to the integration services, each registered device gets a dynamic HA notify service:
-
-```
-notify.mqttdash_<device_id>
-```
-
-Hyphens in `device_id` become underscores. Fields: `message` (required), `title` (optional).
-
-```yaml
-service: notify.mqttdash_kitchen_ipad
-data:
-  title: "Alert"
-  message: "Oven left on"
-```
+Each panel also has a notify entity (`notify.send_message`), which publishes the same payload.
 
 ---
 

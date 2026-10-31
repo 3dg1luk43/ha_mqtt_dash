@@ -102,19 +102,9 @@ Example:
 
 ---
 
-## Device settings (`device`)
+## Panel settings
 
-These mirror the HA entities created for each device and are applied on load and reconnect.
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `keepAwake` | boolean | Prevent screen from sleeping |
-| `brightness` | number 0..1 | Screen brightness |
-| `orientation` | string | `"auto"` \| `"portrait"` \| `"landscape"` |
-| `screensaverTimeout` | number | Idle seconds before screensaver (0 = disabled) |
-| `screensaverFontSize` | number | Screensaver clock font size in pt (0 = device default) |
-
-These can also be set via the corresponding HA entities or the `ha_mqtt_dash.set_device_settings` service.
+Keep awake, brightness, screensaver timeout and orientation are not part of a profile. They are Home Assistant entities on the panel's device (see [Installation](installation.md#per-panel-entities)); a `device` block in a profile is ignored.
 
 ---
 
@@ -267,7 +257,7 @@ Sous vide cooker status tile. Dims when idle/off.
 | `time_entity` | Time remaining (unit-aware) |
 | `unit` | Temperature unit (default `°C`) |
 
-All entities must be in `mirror_entities`.
+The entities are mirrored automatically.
 
 **`appliance`**
 Washer / dishwasher / any appliance (works great with WashData). Shows a state chip (Running, Paused, Finished, Anti wrinkle…), time remaining, program · phase, "Done ~21:07", and a progress bar.
@@ -282,18 +272,22 @@ Washer / dishwasher / any appliance (works great with WashData). Shows a state c
 
 If `progress_entity` / `phase_entity` are omitted and `time_entity` is `sensor.<x>_time_remaining`, HA uses `sensor.<x>_progress` / `sensor.<x>_current_phase` when they exist.
 
-All entities must be in `mirror_entities`.
+The entities are mirrored automatically.
 
 **`mediaplayer`**
-Media player with transport controls and progress bar. Point at any `media_player.*` entity — the integration auto-injects all required MQTT topics.
+Media player for any `media_player.*` entity; the integration adds the MQTT topics. Works at any size from one cell to full screen:
 
-Displays: **album art** (fetched by HA and relayed over MQTT; `show_art: false` disables it), track title, artist, source, ⏮ / ▶⏸ / ⏭, and a seekable progress bar with elapsed/total time.
+- **Art** (fetched and relayed by HA; `show_art: false` turns it off) goes beside the text on wide cards when it fills the card's height, across the top on tall ones, and dimmed behind everything on small ones.
+- The rest of the card gets, while they fit: title and artist, transport, a header with the name and the **output picker**, a seek bar with times, and volume. Leftover space makes the text and buttons larger. A card too small for a seek bar shows a thin progress line along its bottom edge.
+- Controls follow the player's `supported_features`: shuffle and repeat, prev/next, seek, volume, mute and output appear only when the player has them. The layout updates when they change (e.g. another Spotify device).
+- **Output** is the player's `source_list` (Spotify Connect devices, receiver inputs); tap to pick where it plays.
+- **Long-press** the card for the full-screen player with every control.
 
-State `playing` shows pause icon; `paused`/`idle` shows play; `off`/`unavailable`/`unknown` dims the tile.
+State `playing` shows pause; `off`/`unavailable`/`unknown` dims the card, and an off player that supports it shows a power button.
 
-Commands: `media_play_pause`, `media_next_track`, `media_previous_track`, `media_seek` (with `position` in seconds).
+Commands: `media_play_pause`, `media_next_track`, `media_previous_track`, `media_seek` (`position` in seconds), `volume_set` (`volume_level` 0–1), `volume_mute` (`is_volume_muted`), `select_source` (`source`), `shuffle_set` (`shuffle`), `repeat_set` (`repeat`: off / all / one), `turn_on`.
 
-Entity must be in `mirror_entities`.
+The entity is mirrored automatically.
 
 **`cover`**
 For `cover.*` entities (blinds, shades, garage doors, RF shades). The controls shown on the tile **adapt to the entity's `supported_features`**, so a simple open/close-only device shows two buttons while a positionable, tilting blind shows the full set:
@@ -334,7 +328,7 @@ The **order** of the array is honored: top→bottom in tall tiles, row sequence 
 
 > The earlier coarse `cover_controls` array (`"buttons"`/`"slider"`/`"presets"`/`"tilt"`) is still accepted for backward compatibility and is expanded into the equivalent `cover_items` tokens.
 
-Commands published: `open_cover`, `close_cover`, `stop_cover`, `set_cover_position` (with `position` 0–100), and the tilt equivalents `open_cover_tilt`, `close_cover_tilt`, `set_cover_tilt_position`. The integration auto-injects `attr_base`; the app reads `current_position`, `current_tilt_position`, and `supported_features` from it. Entity must be in `mirror_entities` (or use auto-mirror).
+Commands published: `open_cover`, `close_cover`, `stop_cover`, `set_cover_position` (with `position` 0–100), and the tilt equivalents `open_cover_tilt`, `close_cover_tilt`, `set_cover_tilt_position`. The integration auto-injects `attr_base`; the app reads `current_position`, `current_tilt_position`, and `supported_features` from it.
 
 **`spacer`**
 Empty placeholder. No entity, no label, no interaction — just an empty grid cell for layout spacing.

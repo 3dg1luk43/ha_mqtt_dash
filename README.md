@@ -12,16 +12,16 @@ A Home Assistant custom integration and companion iPad app that turns jailbroken
 
 ## Quick start
 
-1. Install the integration via HACS, enter your first `device_id`, and get a starter profile.
+1. Install the integration via HACS and add it (setup asks nothing).
 2. Create a dedicated MQTT user in your broker add-on and restrict it to `mqttdash/#`.
-3. Install the iPad app: `./install_ipad.sh root@<ipad-ip>` (add `--kiosk` for the kiosk tweak). Enter broker + `device_id` in the app's Settings.
-4. In Home Assistant open **Settings → Devices & services → iPad MQTT Dashboard → Configure → Open the dashboard editor**, design your dashboard and hit **⚡ Deploy**.
+3. Install the iPad app: `./install_ipad.sh root@<ipad-ip>` (add `--kiosk` for the kiosk tweak). Enter the broker and a panel name in the app's Settings; the panel then appears in Home Assistant.
+4. In Home Assistant open **Settings → Devices & services → iPad MQTT Dashboard → Configure → Open the dashboard editor**, design your dashboard and press **Deploy**.
 
 Detailed steps: [Installation guide](docs/installation.md) · [iOS deployment guide](docs/ios_deployment.md)
 
 ## Dashboard editor
 
-The drag-and-drop editor is built into the integration and opens inside Home Assistant (admin only, not added to the sidebar): integration options → **Open the dashboard editor**, or a panel's device page → **Visit**. Pick the panel, **⤓ Load** its current layout, design on the iPad frame and **⚡ Deploy**. It uses your Home Assistant login and follows your HA theme; nothing leaves your network.
+The drag-and-drop editor is built into the integration and opens inside Home Assistant (admin only, sidebar entry optional): integration options → **Open the dashboard editor**, or a panel's device page → **Visit**. Pick the panel and **Load** its current layout, or start empty: search for an entity and drag it onto the screen, and the matching card is added. Press **Deploy** to send the layout. It uses your Home Assistant login and theme; nothing leaves your network.
 
 ## Prebuilt app packages
 
@@ -64,14 +64,14 @@ Full schema reference: [Profiles and widgets](docs/profiles_and_widgets.md)
 
 ## Integration highlights
 
-- **Per-device HA entities** — each registered device automatically creates battery, brightness, keep-awake, orientation, screensaver timeout, screensaver font size, and reload-config entities. All are two-way: change the entity in HA and the device responds over MQTT.
-- **Per-device notify services** — `notify.mqttdash_<device_id>` lets automations push notifications directly to a device.
-- **Device registry** — devices appear in the HA device registry with all entities grouped under them.
-- **Profile persistence** — profiles are stored in HA persistent storage and survive restarts without requiring the device to reconnect.
-- **State mirroring** — the integration mirrors selected entities to retained statestream topics. No separate HA Statestream integration needed.
+- **Panels register themselves** — setup asks nothing; a panel appears as a device when the app first connects.
+- **Per-panel entities** — battery, charging, online, last contact, keep awake, brightness, screensaver, orientation, reload, wake screen, check battery and battery care. Panel settings live only in HA and reach the panel at once.
+- **Notifications** — a notify entity per panel (`notify.send_message`).
+- **State mirroring** — the entities your layouts use are mirrored to retained MQTT topics automatically. No separate MQTT Statestream setup.
+- **Diagnostics** — Download diagnostics shows what each panel receives, with secrets removed.
 - **Multi-page support** — profiles can contain a `pages` array; all pages receive live MQTT updates simultaneously.
-- **Built-in editor** — design layouts in Home Assistant (admin-only panel, not in the sidebar) and deploy them to a panel in one click.
-- **Wake and battery care** — wake a sleeping panel from HA, read its battery without waking it, and keep an old iPad's battery between two levels with a smart plug.
+- **Built-in editor** — design layouts in Home Assistant (admin-only panel, optional sidebar entry) and deploy them to a panel in one click.
+- **Wake and battery care** — wake a sleeping panel from HA, read its battery without waking it, and keep an old iPad's battery between two levels with a smart plug (optionally only while someone is home).
 
 ## Onboarding flow
 
@@ -81,10 +81,9 @@ Full schema reference: [Profiles and widgets](docs/profiles_and_widgets.md)
 
 ## Notes and caveats
 
-- Profiles are per device and keyed by `device_id`. The profile editor handles multi-device workflows.
+- Layouts are per panel, keyed by the panel name (`device_id`).
 - The integration mirrors states itself — do not enable or depend on the HA Statestream integration.
 - TLS and WebSockets are not supported by the legacy iOS client. Keep the broker LAN-only and use a restricted MQTT account.
-- The profile push API is local-network only; it rejects requests from public IP addresses even with a valid token.
 
 ## How to report issues
 

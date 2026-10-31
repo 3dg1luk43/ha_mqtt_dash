@@ -16,28 +16,46 @@ Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, a
 - **Timers:** long-press picker with presets, recents, fine adjust and **Save as default**; accurate end-time countdown that survives reloads/restarts; alarm brings its page forward. Running timers keep the screen awake.
 - **Camera:** native MJPEG/snapshot client (no UIWebView) plus `camera_entity` frames relayed by HA; streams only while visible; tap for full screen.
 - **Mealie:** new recipe grid (tag chips, pull or ↻ to refresh) and recipes that open inside the card (back arrow to the list), so timers and the rest of the dashboard stay usable while cooking: two columns on wide cards, tap ingredients to check off and steps to mark done (kept per recipe).
-- **Printer / appliance / sous vide / media player** redesigned; unit-aware durations with ETA; print thumbnail; album art.
+- **Printer / appliance / sous vide** redesigned; unit-aware durations with ETA; print thumbnail.
+- **Media player** rebuilt as one fluid layout from a single cell to full screen: album art beside, above or behind the controls depending on the card's shape; title, transport, output picker, seek and volume added as space allows, with no empty areas. Controls follow the player's supported features (shuffle, repeat, volume, mute, output). Output picker lists the player's sources (e.g. Spotify Connect devices). Long-press opens the full-screen player.
 - Identical configs are no longer re-rendered on reconnect; batched, de-duplicated subscriptions; Settings no longer pops up on network blips (auth failures only); "Exit to Home Screen" in the long-press menu.
 
-- **Reachable while asleep:** with the screen off the app keeps a minimal VoIP-mode MQTT link (request topic only), so HA can wake it or read the battery; status reports `sleeping`. Toggle: Settings → Reachable asleep.
+- **Reachable while asleep:** with the screen off the app keeps a minimal VoIP-mode MQTT link (request topic only), so HA can wake it or read the battery; status reports `sleeping`. Toggle: Settings → Reachable asleep. HA's `sleep` request locks the screen again after a battery check (not while in use, keep-awake on or a timer runs). Lifecycle trace in `Library/Caches/mqttdash_life.log`.
+- The sleep link is also set up when the app starts behind the lock screen (kiosk auto-launch after a respring or reboot); before, iOS suspended it with no link and Wi-Fi dropped.
+- HA's `screensaver_timeout` setting (settings topic) sets the screensaver; 0 turns it off.
 
-### Kiosk tweak 1.1
+### Kiosk tweak 1.2
 - Home button works normally (iOS Settings reachable); returns to the dashboard after 2 min idle on the home screen. Wake still skips the lock screen; banners still suppressed.
-- `mqttdash-kiosk wake` (Darwin notification) wakes the screen remotely.
+- `mqttdash-kiosk wake` / `sleep` (Darwin notifications) wake or lock the screen remotely.
+- Lock / unlock clicks and the charging chime are muted while the panel is locked; timestamped `/tmp/kiosk_debug.log`.
+- After a respring or reboot it unlocks before starting the dashboard, so the app starts in the foreground.
 
 ### Home Assistant Integration
-- **Dashboard editor inside HA:** admin-only panel at `/mqttdash-editor` without a sidebar entry or HA toolbar (full content area); linked from the integration options and each panel's device page. Uses HA's login over admin-only WebSocket commands (`ha_mqtt_dash/devices`, `get_profile`, `apply_profile`). Loads the panel's current layout in its orientation, follows the HA theme, fits the window (icon rail and drawer on smaller screens).
-- **Wake screen** and **Check battery** buttons per panel.
-- **Battery care:** switches the charger plug between a start/stop level (default 35–80 %), polls the battery without waking the screen, charges as a fail-safe when reports stop. Configure in options → Battery care; switch, level numbers and a status sensor per panel.
+- Setup asks nothing; panels register themselves on their first hello. A panel without a layout shows a "no layout yet" note instead of borrowing another panel's layout.
+- Options reduced to the dashboard editor (with optional sidebar entry) and battery care. Removed: entity mirroring list (the entities your layouts use are always mirrored), entity reference, add device manually, profile JSON editing.
+- Actions reduced to `reload` and `set_device_profile` (now with a device picker). Removed `push_config`, `reload_config`, `set_device_settings`, `publish_snapshot`, `prune_unassigned`, `dump_state`, `republish_reload_all`, `dump_store`, `dump_runtime_cfg` and `dump_device_config`; use **Download diagnostics** instead (secrets redacted).
+- Notify entity per panel (`notify.send_message`) replaces the `notify.mqttdash_<id>` and `ha_mqtt_dash.notify` actions.
+- Entity names translated and in sentence case; Brightness is 5–100 %; new Screensaver number. Keep awake, brightness, screensaver and orientation live only in HA (a profile's `device` block is ignored), and the settings topic always carries all of them.
+- Requires Home Assistant 2026.5 or newer.
+- **Dashboard editor inside HA:** admin-only panel at `/mqttdash-editor` without HA toolbar (full content area), sidebar entry optional (options → Open the dashboard editor); linked from the integration options and each panel's device page. Uses HA's login over admin-only WebSocket commands (`ha_mqtt_dash/devices`, `get_profile`, `apply_profile`). Loads the panel's current layout in its orientation, follows the HA theme, fits the window (icon rail and drawer on smaller screens).
+- **Wake screen** and **Check battery** buttons per panel; a panel that's unreachable over MQTT is woken with its charger plug.
+- **Battery care:** switches the charger plug between a start/stop level (default 35–80 %). Readings come over MQTT; only an unanswering panel is woken by power (quietly, rate limited) and locked again afterwards, with the plug restored. Fail-safe charging when a wake goes unanswered or after 4 h without a report. Optional presence: works only while someone is home. Configure in options → Battery care; switch, level numbers and a status sensor per panel.
+- **Last contact** diagnostic sensor per panel: when it last sent anything, its link state and the last charger wake.
+- Media player commands for volume, mute, output (`select_source`), shuffle and repeat, validated and limited to allowlisted entities.
 - Album art / print thumbnails → `mqttdash/art/<entity_id>`; camera frames → `mqttdash/camera/<entity_id>/frame` on demand.
 - New widget fields passed through (`camera_entity`, `refresh_interval`, printer target/layer/preview entities, appliance `progress_entity`/`phase_entity` with WashData auto-detection, `temp_step`, timer `presets`, `show_art`).
 - Attributes published as JSON / ISO 8601 instead of Python reprs.
 - Security: commands only for entities that are controllable widgets; no device purge over MQTT; push API admin-only and no longer re-opened on restart.
 - Fixes: a registered panel whose hardware GUID was left on the purged list (from deleting an older device on the same iPad) had every hello ignored; device renames reverting after restart (in-place option mutation), pushed profiles pruned before their device onboards, leftover retained attributes, snapshot floods on reconnect, startup-blocking tasks, duplicate HTTP routes.
 
-### Profile Editor
-- Fields and live previews for all of the above.
-- Runs inside HA: panel picker, load current layout, deploy over HA's connection, HA-themed and window-fitting UI. `tools/build_editor.sh` bundles it into the integration. Sous vide and Mealie previews match the new cards.
+### Dashboard editor
+- Runs inside HA: panel picker, load current layout, deploy over HA's connection, HA-themed and window-fitting UI. `tools/build_editor.sh` bundles it into the integration. Previews match the new cards.
+- **Add cards from entities:** search Home Assistant entities by name and drag one onto the screen; the card type follows the domain (light, climate, media player…). Card types are grouped; Value and Button are folded into Sensor and Scene (old profiles still load).
+- Entity fields pick from HA by friendly name, filtered to what the card accepts. The Entities tab (local entity list, bulk add, sync) is gone.
+- Toolbar: Material Design icons, panel picker + Load, orientation, undo/redo, Deploy with an unsaved-changes dot; Profile JSON, Help and Clear layout in the ⋮ menu. The iPad model picker is gone: the canvas follows the panel's own screen.
+- Card settings: name, entity and card options first; Appearance shows only what that card uses; position in a collapsed section; no internal ID field. Grid and navigation bar when nothing is selected; pixel sizes under "Cell size and spacing".
+- Removed: the 6-step tutorial (now a one-page Help and an empty-page hint), the standalone mode (share links, separate toolbar), the "HA mirror entities" list, the banner text and the panel settings (keep awake, screensaver, clock size), which belong to the panel's HA entities.
+- `Delete` removes the selected card, `Esc` deselects. Fixed: loading a profile dropped its navigation-bar colors; drops onto a page with its own grid used the shared grid.
 
 ### Repository and tooling
 - One public repo: the integration, the dashboard editor (`editor/`) and the iPad packages (`releases/`). The iOS app source stays private. The standalone GitHub Pages editor is gone; the editor lives in Home Assistant.
