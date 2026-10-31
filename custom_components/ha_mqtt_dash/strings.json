@@ -22,7 +22,7 @@
         "menu_options": {
           "editor": "Open the dashboard editor",
           "battery": "Battery care",
-          "cast": "YouTube casting"
+          "cast": "Video and casting"
         }
       },
       "editor": {
@@ -33,10 +33,11 @@
         }
       },
       "cast": {
-        "title": "YouTube casting",
-        "description": "Each panel shows up under **Cast** in the YouTube app on phones on the same network, like a smart TV, and plays what you cast. Discovery uses SSDP (UDP 1900) on Home Assistant's network; the panel's video server (port 8765) answers the phone.",
+        "title": "Video and casting",
+        "description": "Each panel shows up under **Cast** in the YouTube app on phones on the same network, like a smart TV, and plays what you cast. Discovery uses SSDP (UDP 1900) on Home Assistant's network; the panel's video server (port 8765) answers the phone.\n\nQuiet videos (YouTube measures their loudness) can be made louder for the iPad's small speakers: only their audio is re-encoded, the video is passed through untouched.",
         "data": {
-          "yt_cast": "Allow casting from the YouTube app"
+          "yt_cast": "Allow casting from the YouTube app",
+          "boost_quiet": "Make quiet videos louder"
         }
       },
       "battery": {

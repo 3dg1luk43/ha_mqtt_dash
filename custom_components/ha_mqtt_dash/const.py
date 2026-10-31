@@ -6,6 +6,7 @@ CONF_PROFILES = "profiles"
 CONF_PLACEHOLDER_ON_REMOVE = "placeholder_on_remove"  # bool
 CONF_EDITOR_SIDEBAR = "editor_sidebar"  # bool — show the dashboard editor in the sidebar
 CONF_YT_CAST = "yt_cast"  # bool (default on) — panels are cast targets in the YouTube app
+CONF_BOOST_QUIET = "boost_quiet"  # bool (default on) — re-encode the audio of quiet videos louder
 
 
 # Dispatcher signal names

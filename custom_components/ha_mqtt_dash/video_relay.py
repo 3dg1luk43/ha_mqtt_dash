@@ -190,6 +190,9 @@ class MjpegServer:
         for s in list(self.streams.values()):
             await s.stop()
         self.streams.clear()
+        for sess in self.hls.sessions.values():
+            if sess.booster:
+                await sess.booster.close()
         self.hls.sessions.clear()
         await self.hls.close()
         if self._runner:
@@ -279,6 +282,27 @@ class HlsSource:
     headers: Dict[str, str] = field(default_factory=dict)
     duration: Optional[float] = None
     thumbnail: Optional[str] = None
+    loudness: Optional[float] = None   # LUFS, as YouTube measured it
+
+
+def _youtube_loudness(manifest_url: Optional[str], audio_url: Optional[str], headers: Dict[str, str]) -> Optional[float]:
+    """YT-EXT-ABSOLUTE-LOUDNESS of the chosen audio track from YouTube's HLS master."""
+    if not manifest_url:
+        return None
+    import urllib.request
+    try:
+        text = urllib.request.urlopen(urllib.request.Request(manifest_url, headers=headers), timeout=15).read().decode()
+    except Exception:
+        return None
+    found = None
+    for line in text.splitlines():
+        m = re.search(r"YT-EXT-ABSOLUTE-LOUDNESS=(-?[\d.]+)", line)
+        if not m:
+            continue
+        if line.startswith("#EXT-X-MEDIA") and audio_url and f'URI="{audio_url}"' in line:
+            return float(m.group(1))
+        found = found if found is not None else float(m.group(1))
+    return found
 
 
 def resolve_hls(url: str, max_height: int = 720) -> Optional[HlsSource]:
@@ -301,10 +325,12 @@ def resolve_hls(url: str, max_height: int = 720) -> Optional[HlsSource]:
         return None
     audio = [f for f in hls if f.get("vcodec") in (None, "none") and f.get("acodec") != "none"]
     audio.sort(key=lambda f: _audio_rank(f, info.get("language")), reverse=True)
+    headers = {k: v for k, v in (hls[0].get("http_headers") or {}).items() if isinstance(v, str)}
+    audio_url = audio[0]["url"] if audio else None
     return HlsSource(
-        title=info.get("title"), video=video, audio=audio[0]["url"] if audio else None,
-        headers={k: v for k, v in (hls[0].get("http_headers") or {}).items() if isinstance(v, str)},
+        title=info.get("title"), video=video, audio=audio_url, headers=headers,
         duration=info.get("duration"), thumbnail=info.get("thumbnail"),
+        loudness=_youtube_loudness(next((f.get("manifest_url") for f in hls if f.get("manifest_url")), None), audio_url, headers),
     )
 
 
@@ -320,6 +346,8 @@ class HlsSession:
         self.token = secrets.token_urlsafe(12)
         self.segments: Dict[str, list] = {}   # playlist name -> upstream segment URLs
         self.last_variant: Optional[str] = None   # what the panel fetched last ("v2" → 720p …)
+        self.boost_db = 0.0                        # > 0: the audio rendition is made louder
+        self.booster = None                        # audio_boost.AudioBooster, made on first use
         self.sent_bytes = 0
         self.last_seen = 0.0
 
@@ -414,13 +442,27 @@ class HlsProxy:
             s.last_variant = name
         return web.Response(text="\n".join(out) + "\n", content_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
 
+    async def _fetch(self, s: HlsSession, url: str) -> bytes:
+        async with self._http().get(_raw_url(url), headers=s.src.headers) as r:
+            r.raise_for_status()
+            return await r.read()
+
     async def _segment(self, request):
         from aiohttp import web
         s = self._session(request)
-        segs = s.segments.get(request.match_info["name"]) or []
+        name = request.match_info["name"]
+        segs = s.segments.get(name) or []
         idx = int(request.match_info["idx"])
         if idx >= len(segs):
             raise web.HTTPNotFound()
+        if name == "a" and s.boost_db > 0:
+            if s.booster is None:
+                from .audio_boost import AudioBooster
+                s.booster = AudioBooster(lambda i: self._fetch(s, segs[i]), len(segs), s.boost_db)
+            data = await s.booster.get(idx)
+            if data:
+                s.sent_bytes += len(data)
+                return web.Response(body=data, content_type="video/mp2t", headers={"Cache-Control": "no-store"})
         async with self._http().get(_raw_url(segs[idx]), headers=s.src.headers) as r:
             if r.status >= 400:
                 _LOGGER.debug("hls segment %s/%s: upstream HTTP %s", request.match_info["name"], idx, r.status)
@@ -493,6 +535,9 @@ class PanelVideo:
             "duration": a.get("duration"), "position": a.get("position"), "position_at": a.get("position_at"),
             "kind": a.get("kind"), "error": a.get("error") or (stream.error if stream else None),
             "relayed_mb": round(sess.sent_bytes / 1e6, 1) if sess else None,
+            "loudness_lufs": a.get("loudness"),
+            "boosted_segments": sess.booster.boosted if sess and sess.booster else None,
+            "audio_boost_db": sess.boost_db if sess and sess.boost_db > 0 and not (sess.booster and sess.booster.failed) else None,
             "quality": f"{sess.height_of(sess.last_variant)}p" if sess and sess.height_of(sess.last_variant) else None,
             "frames": stream.seq if stream else None,
         }
@@ -516,9 +561,13 @@ class PanelVideo:
         host = f"http://{await self._source_ip()}:{self.port}"
         if hls:
             sess = HlsSession(hls)
+            from .audio_boost import gain_for
+            from .const import CONF_BOOST_QUIET
+            if hls.audio and (self.bridge.cfg or {}).get(CONF_BOOST_QUIET, True):
+                sess.boost_db = gain_for(hls.loudness)
             server.hls.sessions[sess.token] = sess
             entry = {"kind": "hls", "token": sess.token, "hls": sess, "title": title or hls.title or url,
-                     "thumbnail": hls.thumbnail, "duration": hls.duration}
+                     "thumbnail": hls.thumbnail, "duration": hls.duration, "loudness": hls.loudness}
             panel_url = f"{host}/hls/{sess.token}/master.m3u8"
         elif url.lower().startswith("http://"):
             entry = {"kind": "direct", "title": title or url}   # the iPad fetches it itself
@@ -559,7 +608,9 @@ class PanelVideo:
             if a.get("kind") == "mjpeg":
                 await self.server.remove(a["token"])
             elif a.get("kind") == "hls":
-                self.server.hls.sessions.pop(a["token"], None)
+                sess = self.server.hls.sessions.pop(a["token"], None)
+                if sess and sess.booster:
+                    await sess.booster.close()
         if tell_panel:
             await self.bridge.async_send_device_request(device_id, "stop_video")
         self._changed(device_id)

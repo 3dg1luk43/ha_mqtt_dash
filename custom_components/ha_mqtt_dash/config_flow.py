@@ -12,7 +12,7 @@ from homeassistant import config_entries  # type: ignore
 from homeassistant.core import callback  # type: ignore
 from homeassistant.helpers import selector  # type: ignore
 
-from .const import DOMAIN, CONF_DEVICES, CONF_PROFILES, CONF_EDITOR_SIDEBAR, CONF_YT_CAST
+from .const import DOMAIN, CONF_DEVICES, CONF_PROFILES, CONF_EDITOR_SIDEBAR, CONF_YT_CAST, CONF_BOOST_QUIET
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[misc]
@@ -60,15 +60,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     # YouTube casting: every panel is a cast target in the YouTube app (on by default)
     async def async_step_cast(self, user_input=None):
-        current = bool(self._entry.options.get(CONF_YT_CAST, True))
+        cur = {k: bool(self._entry.options.get(k, True)) for k in (CONF_YT_CAST, CONF_BOOST_QUIET, CONF_BOOST_QUIET)}
         if user_input is not None:
-            wanted = bool(user_input.get(CONF_YT_CAST, current))
-            if wanted == current:
+            wanted = {k: bool(user_input.get(k, v)) for k, v in cur.items()}
+            if wanted == cur:
                 return await self.async_step_init()
             opts = {k: v for k, v in (self._entry.options or {}).items() if k != CONF_PROFILES}
-            return self.async_create_entry(title="", data={**opts, CONF_YT_CAST: wanted})
+            return self.async_create_entry(title="", data={**opts, **wanted})
         schema = vol.Schema({
-            vol.Optional(CONF_YT_CAST, default=current): selector.BooleanSelector(),
+            vol.Optional(CONF_YT_CAST, default=cur[CONF_YT_CAST]): selector.BooleanSelector(),
+            vol.Optional(CONF_BOOST_QUIET, default=cur[CONF_BOOST_QUIET]): selector.BooleanSelector(),
         })
         return self.async_show_form(step_id="cast", data_schema=schema)
 
