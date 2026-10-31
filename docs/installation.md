@@ -94,6 +94,8 @@ While the screen is off, iOS suspends the app. With **Reachable asleep** on (app
 
 A reading is wanted every 5 min while charging (15 min otherwise). A reachable panel (`online`, or `sleeping` over the background link) is asked over MQTT and the screen stays off. Only a panel that doesn't answer is woken by power: HA switches the charger on (or off and on), which lights the iPad's screen; the app reports and is told to lock again (it ignores that while someone is using it, keep-awake is on or a timer runs), and the plug goes back to how it was. With the kiosk tweak installed the lock clicks and the charging chime are muted while the panel is locked. Charger wakes happen at most every 30 min while charging and every 2 h otherwise. A panel that doesn't answer a charger wake, or hasn't reported for 4 h, keeps the charger **on** as a fail-safe.
 
+Use a charger that can power an iPad: the iPad 1 needs a 10 W (2 A) adapter; a weaker USB port charges it slowly, or not at all while the screen is on. If the plug is on but the iPad reports not charging (it may show "Charging is not supported with this accessory"), HA turns the plug off for a minute and on again, at most hourly; after three tries that don't help, the status sensor warns to check the cable or the adapter.
+
 Optionally pick people (or device trackers): battery care then only works while one of them is home. Otherwise it pauses (status `away`): no checks, no wakes, the plug is left as it is.
 
 ## Notifications

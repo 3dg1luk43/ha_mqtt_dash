@@ -47,7 +47,12 @@ REPORT_TIMEOUT = 90             # a reachable panel answers a report request wit
 WAKE_TIMEOUT = 3 * 60           # after a charger wake, wait this long for the report
 WAKE_EVERY_CHARGING = 30 * 60   # automatic charger wakes at most this often while charging
 WAKE_EVERY_RESTING = 2 * 3600   # …and while resting (drain with the screen off is slow)
-POWER_GAP = 5                   # off → on gap when the charger was already on
+# Off → on gap when the charger was already on. A short gap (5 s) can leave an
+# iPad 1 refusing the charger ("Charging is not supported with this
+# accessory") until the cable is reseated; a minute off lets it start over.
+POWER_GAP = 60
+REPLUG_EVERY = 3600             # charger on but the panel not charging: re-plug at most this often…
+REPLUG_TRIES = 3                # …and give up (warning stays) after this many that didn't help
 STALE_AFTER = 4 * 3600          # no reading for this long → fail-safe charging
 STARTUP_GRACE = 10 * 60         # after HA start, wait this long before waking / fail-safe
 MIN_GAP = 10                    # start must be at least this many % below stop
@@ -94,6 +99,9 @@ class BatteryCare:
         self._last_wake_wall: Dict[str, float] = {}
         self._last_wake_result: Dict[str, str] = {}
         self._restore: Dict[str, bool] = {}             # charger state to return to after a wake
+        self._replugging: set = set()                    # panels whose charger is being re-plugged
+        self._last_replug: Dict[str, float] = {}
+        self._replug_tries: Dict[str, int] = {}          # re-plugs since the panel last charged
         self._status: Dict[str, Dict[str, Any]] = {}
         self._unsub = None
 
@@ -232,6 +240,26 @@ class BatteryCare:
             await self._switch(charger, True)
         except Exception:
             _LOGGER.warning("battery care: could not switch %s", charger, exc_info=True)
+        pend = self._pending.get(device_id)
+        if pend is not None and pend.get("kind") == "wake":
+            pend["since"] = time.monotonic()   # the wait for the report starts at power on
+        await self.async_evaluate(device_id)
+
+    async def _replug(self, device_id: str, charger: str) -> None:
+        """Charger on, panel not charging: power it off for a while and on again."""
+        self._replugging.add(device_id)
+        self._last_replug[device_id] = time.monotonic()
+        self._replug_tries[device_id] = self._replug_tries.get(device_id, 0) + 1
+        _LOGGER.info("battery care %s: charger %s is on but the panel isn't charging: re-plugging it (try %s)",
+                     device_id, charger, self._replug_tries[device_id])
+        try:
+            await self._switch(charger, False)
+            await asyncio.sleep(POWER_GAP)
+            await self._switch(charger, True)
+        except Exception:
+            _LOGGER.warning("battery care: could not switch %s", charger, exc_info=True)
+        finally:
+            self._replugging.discard(device_id)
         await self.async_evaluate(device_id)
 
     def _wake_allowed(self, device_id: str, charging: Optional[bool]) -> bool:
@@ -254,6 +282,8 @@ class BatteryCare:
                 _LOGGER.debug("battery care: tick failed for %s", did, exc_info=True)
 
     async def _tick_device(self, did: str) -> None:
+        if did in self._replugging:   # the charger is off on purpose for a minute
+            return
         now = time.monotonic()
         pend = self._pending.get(did)
         if pend:  # time out whatever is in flight, manual ones included
@@ -326,7 +356,11 @@ class BatteryCare:
         restore = self._restore.pop(device_id, None)
 
         want: Optional[bool] = None
-        if pend.get("kind") == "wake":
+        if tel.get("charging"):
+            self._replug_tries.pop(device_id, None)
+        if device_id in self._replugging:
+            status["reason"] = "re-plugging the charger: the panel wasn't charging"
+        elif pend.get("kind") == "wake":
             status["reason"] = "woke the panel with the charger, waiting for its report"
         elif stale or battery is None:
             if in_grace:
@@ -361,8 +395,17 @@ class BatteryCare:
             status["state"] = "charging" if charger_on else "resting"
         # A charger that is on while the panel says it isn't charging usually
         # means a loose cable or a too-weak power brick.
-        if charger_on and tel.get("charging") is False and not stale and not pend:
-            status["warning"] = "charger is on but the panel reports not charging"
+        if charger_on and tel.get("charging") is False and not stale and not pend and device_id not in self._replugging:
+            tries = self._replug_tries.get(device_id, 0)
+            if tries >= REPLUG_TRIES:
+                status["warning"] = ("charger is on but the panel reports not charging, also after re-plugging it: "
+                                     "check the cable, or use a 10 W adapter (the iPad 1 needs 2 A)")
+            else:
+                status["warning"] = "charger is on but the panel reports not charging"
+                last_replug = self._last_replug.get(device_id)
+                if (battery is not None and battery < cfg["stop"] and not in_grace
+                        and (last_replug is None or now - last_replug >= REPLUG_EVERY)):
+                    self.hass.async_create_task(self._replug(device_id, cfg["charger"]))
         self._publish_status(device_id, status)
 
     def _publish_status(self, device_id: str, status: Dict[str, Any]) -> None:
