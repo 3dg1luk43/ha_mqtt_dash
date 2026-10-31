@@ -57,6 +57,15 @@ Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, a
 - Removed: the 6-step tutorial (now a one-page Help and an empty-page hint), the standalone mode (share links, separate toolbar), the "HA mirror entities" list, the banner text and the panel settings (keep awake, screensaver, clock size), which belong to the panel's HA entities.
 - `Delete` removes the selected card, `Esc` deselects. Fixed: loading a profile dropped its navigation-bar colors; drops onto a page with its own grid used the shared grid.
 
+### Experimental: video on panels
+- **Video media player** per panel (`media_player.<panel>_video`): `play_media` with a YouTube link or a video URL. HA resolves it with yt-dlp and relays the H.264 HLS the iPad 1 decodes in hardware (≤ 480p, with audio) from its own HTTP server (port 8765), byte for byte, without transcoding. Pause, play, seek and stop; the panel reports state and position.
+- **Video card** (editor, Media group): plays the panel's video at the card's size and keeps playing on other pages; without one, videos open full screen.
+- **Cast from the YouTube app** with `tools/cast_bridge` (a YouTube TV receiver run on any LAN machine). See [docs/video.md](docs/video.md).
+
+### Styling fixes
+- Timers show their accent color when idle too, as in the editor.
+- Editor previews use the entities' live states (on/off, brightness, sensor values, climate mode) and the app's color rules, so a card looks the same in the editor as on the panel.
+
 ### Repository and tooling
 - One public repo: the integration, the dashboard editor (`editor/`) and the iPad packages (`releases/`). The iOS app source stays private. The standalone GitHub Pages editor is gone; the editor lives in Home Assistant.
 - `install_ipad.sh`: one command installs the app on a jailbroken iPad over SSH - detects the iOS version, picks the legacy (armv7) or modern (arm64) build, handles the legacy SSH algorithms iOS 5 needs, optional kiosk tweak.

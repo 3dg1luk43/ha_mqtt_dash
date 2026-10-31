@@ -71,6 +71,7 @@ Full schema reference: [Profiles and widgets](docs/profiles_and_widgets.md)
 - **Diagnostics** — Download diagnostics shows what each panel receives, with secrets removed.
 - **Multi-page support** — profiles can contain a `pages` array; all pages receive live MQTT updates simultaneously.
 - **Built-in editor** — design layouts in Home Assistant (admin-only panel, optional sidebar entry) and deploy them to a panel in one click.
+- **Video (experimental)** — play YouTube links or video URLs on a panel from HA, or cast from the YouTube app ([docs/video.md](docs/video.md)).
 - **Wake and battery care** — wake a sleeping panel from HA, read its battery without waking it, and keep an old iPad's battery between two levels with a smart plug (optionally only while someone is home).
 
 ## Onboarding flow

@@ -289,6 +289,9 @@ Commands: `media_play_pause`, `media_next_track`, `media_previous_track`, `media
 
 The entity is mirrored automatically.
 
+**`video`**
+Hosts the panel's video (see [video.md](video.md)): whatever HA plays on `media_player.<panel>_video` or a YouTube cast shows here at the card's size, with the native controls, and keeps playing while another page is shown. No entity. Without a video card, videos open full screen.
+
 **`cover`**
 For `cover.*` entities (blinds, shades, garage doors, RF shades). The controls shown on the tile **adapt to the entity's `supported_features`**, so a simple open/close-only device shows two buttons while a positionable, tilting blind shows the full set:
 
