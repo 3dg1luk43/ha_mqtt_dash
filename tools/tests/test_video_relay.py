@@ -145,6 +145,7 @@ def test_a_stop_while_resolving_wins():
         hass = SimpleNamespace(async_add_executor_job=executor)
         bridge = SimpleNamespace(cfg={}, async_send_device_request=AsyncMock())
         pv = vr.PanelVideo(hass, bridge, port=_free_port())
+        pv._yt_dlp_ready = True
         pv._changed = lambda d: None
         pv._source_ip = AsyncMock(return_value="127.0.0.1")
         play = asyncio.ensure_future(pv.async_play("kitchen", "https://youtu.be/x"))
@@ -170,6 +171,7 @@ def test_a_failed_play_does_not_stay_loading():
             return None
         bridge = SimpleNamespace(cfg={}, async_send_device_request=AsyncMock())
         pv = vr.PanelVideo(SimpleNamespace(async_add_executor_job=executor), bridge, port=_free_port())
+        pv._yt_dlp_ready = True
         pv._changed = lambda d: None
         pv._source_ip = AsyncMock(return_value="127.0.0.1")
         with pytest.raises(ValueError):
@@ -179,3 +181,12 @@ def test_a_failed_play_does_not_stay_loading():
             await pv.server.stop()
 
     asyncio.run(run())
+
+
+def test_an_old_yt_dlp_is_reported_not_silently_empty():
+    from types import SimpleNamespace
+    old, new = SimpleNamespace(version=SimpleNamespace(__version__="2026.07.04")), SimpleNamespace(version=SimpleNamespace(__version__="2026.10.26"))
+    with pytest.raises(vr.YtDlpTooOld, match="restart Home Assistant"):
+        vr._check_yt_dlp(old)
+    vr._check_yt_dlp(new)
+    assert vr.needs_yt_dlp("https://youtu.be/x") and not vr.needs_yt_dlp("https://cdn/x/master.m3u8?t=1")

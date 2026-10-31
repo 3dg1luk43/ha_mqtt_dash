@@ -338,6 +338,29 @@ def parse_master(url: str, text: str, max_height: int = 720) -> Optional[HlsSour
     return HlsSource(title=None, video=sorted(set(video), key=lambda v: v[0]), audio=audio_by_group.get(group or ""))
 
 
+# Installed on the first video, not from manifest.json: HA core pins an older
+# yt-dlp (media_extractor) that no longer gets YouTube's H.264 HLS, and
+# hassfest rejects a conflicting pin. Older versions find no stream at all.
+YT_DLP_MIN = "2026.10.26"
+YT_DLP_REQUIREMENT = f"yt-dlp>={YT_DLP_MIN}"
+
+
+class YtDlpTooOld(RuntimeError):
+    pass
+
+
+def needs_yt_dlp(url: str) -> bool:
+    return not url.lower().split("?")[0].endswith(".m3u8")
+
+
+def _check_yt_dlp(yt_dlp) -> None:
+    have = getattr(getattr(yt_dlp, "version", None), "__version__", "0")
+    num = lambda v: tuple(int(p) for p in re.findall(r"\d+", v)[:3])  # noqa: E731
+    if num(have) < num(YT_DLP_MIN):
+        raise YtDlpTooOld(f"yt-dlp {have} is loaded, video needs {YT_DLP_MIN} or newer: restart Home Assistant "
+                          "(the Media extractor integration installs an older one)")
+
+
 def resolve_hls(url: str, max_height: int = 720) -> Optional[HlsSource]:
     """Blocking: HLS variants the iPad decodes natively, or None (then use MJPEG)."""
     if url.lower().split("?")[0].endswith(".m3u8"):
@@ -354,6 +377,7 @@ def resolve_hls(url: str, max_height: int = 720) -> Optional[HlsSource]:
         import yt_dlp  # type: ignore
     except ImportError:
         return None
+    _check_yt_dlp(yt_dlp)
     with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True, "skip_download": True}) as ydl:
         info = ydl.extract_info(url, download=False)
     fmts = info.get("formats") or []
@@ -539,6 +563,7 @@ class PanelVideo:
         self.active: Dict[str, Dict[str, Any]] = {}   # device_id -> {kind, token, title, url, state, position, …}
         self.last_end: Dict[str, str] = {}   # device_id -> how the panel's last video ended: ended / closed / error
         self._unsub = None
+        self._yt_dlp_ready = False
 
     async def async_setup(self) -> None:
         from homeassistant.components import mqtt  # type: ignore
@@ -559,6 +584,18 @@ class PanelVideo:
             self.server = MjpegServer(port=self.port)
             await self.server.start()
         return self.server
+
+    async def _ensure_yt_dlp(self) -> None:
+        """Install yt-dlp through HA's requirements installer (once; a no-op when present)."""
+        if self._yt_dlp_ready:
+            return
+        try:
+            from homeassistant.requirements import async_process_requirements  # type: ignore
+            from .const import DOMAIN
+            await async_process_requirements(self.hass, DOMAIN, [YT_DLP_REQUIREMENT])
+            self._yt_dlp_ready = True
+        except Exception as err:  # no network, skip_pip …: resolving reports what's missing
+            _LOGGER.warning("video: couldn't install %s: %s", YT_DLP_REQUIREMENT, err)
 
     async def _source_ip(self) -> str:
         try:
@@ -604,8 +641,12 @@ class PanelVideo:
     async def _play(self, device_id: str, url: str, title: Optional[str], start: float, gen: object) -> None:
         import time as _t
         current = lambda: (self.active.get(device_id) or {}).get("gen") is gen  # noqa: E731
+        if needs_yt_dlp(url):
+            await self._ensure_yt_dlp()
         try:
             hls = await self.hass.async_add_executor_job(resolve_hls, url)
+        except YtDlpTooOld:
+            raise
         except Exception as err:
             hls = None
             _LOGGER.debug("video: no HLS for %s: %s", url, err)

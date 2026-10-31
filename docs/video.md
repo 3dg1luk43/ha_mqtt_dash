@@ -14,7 +14,7 @@ So Home Assistant decodes nothing. The integration:
 
 The iPad plays it with sound in its native player. The relay costs well under 1 % of a CPU core. Plain `http://` video URLs go straight to the iPad. Sources with no stream the iPad can play are refused (an MJPEG fallback with ffmpeg exists in the code but is off: it decodes and costs real CPU).
 
-Requirements: the panel must reach the Home Assistant host on port 8765 (plain HTTP, LAN only). The integration installs `yt-dlp`. YouTube extraction without a JavaScript runtime is deprecated in yt-dlp and may stop working in a future version.
+Requirements: the panel must reach the Home Assistant host on port 8765 (plain HTTP, LAN only). The integration installs `yt-dlp` (2026.10.26 or newer) the first time a video plays; older versions get no stream the iPad can play. HA's own **Media extractor** integration pins an older yt-dlp: with both in use, the video player reports it and asks for a restart. YouTube extraction without a JavaScript runtime is deprecated in yt-dlp and may stop working in a future version.
 
 ## Playing something
 

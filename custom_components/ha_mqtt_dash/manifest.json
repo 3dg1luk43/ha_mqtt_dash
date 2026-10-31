@@ -23,9 +23,7 @@
   "loggers": [
     "ha_mqtt_dash"
   ],
-  "requirements": [
-    "yt-dlp==2026.10.26"
-  ],
+  "requirements": [],
   "single_config_entry": true,
   "version": "0.6.0"
 }
