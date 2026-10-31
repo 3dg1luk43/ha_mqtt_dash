@@ -1,0 +1,20 @@
+# systemd unit for the cast bridge. Copy to /etc/systemd/system/ha-mqtt-dash-cast.service,
+# fill in the values, then: systemctl daemon-reload && systemctl enable --now ha-mqtt-dash-cast
+[Unit]
+Description=YouTube cast receiver for an iPad MQTT Dashboard panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/path/to/ha_mqtt_dash/tools/cast_bridge
+Environment=HA_URL=https://homeassistant.example.lan
+Environment=HA_TOKEN_FILE=/path/to/ha_long_lived_token
+Environment=PANEL_ENTITY=media_player.kitchen_video
+Environment="SCREEN_NAME=Kitchen iPad"
+Environment=DIAL_INTERFACES=eth0
+ExecStart=/usr/bin/node cast_bridge.mjs
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
