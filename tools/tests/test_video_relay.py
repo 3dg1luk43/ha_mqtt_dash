@@ -55,6 +55,7 @@ def test_only_h264_the_ipad_decodes_is_offered():
     assert not vr._ipad_h264({**ok, "vcodec": "avc1.64001F"}, 480)                            # High profile
     assert not vr._ipad_h264({**ok, "vcodec": "vp09.00.30.08"}, 480)
     assert not vr._ipad_h264({**ok, "height": 720}, 480)
+    assert vr._ipad_h264({"vcodec": "avc1.4D401F", "height": 720, "fps": 25}, 720)                # 720p25 Main L3.1
 
 
 def test_hls_proxy_rewrites_playlists_and_relays_segments_untouched():

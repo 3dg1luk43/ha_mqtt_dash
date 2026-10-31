@@ -269,7 +269,7 @@ class HlsSource:
     thumbnail: Optional[str] = None
 
 
-def resolve_hls(url: str, max_height: int = 480) -> Optional[HlsSource]:
+def resolve_hls(url: str, max_height: int = 720) -> Optional[HlsSource]:
     """Blocking: HLS variants the iPad decodes natively, or None (then use MJPEG)."""
     if url.lower().split("?")[0].endswith(".m3u8"):
         return HlsSource(title=None, video=[(0, 0, "", url)], audio=None)
@@ -281,8 +281,10 @@ def resolve_hls(url: str, max_height: int = 480) -> Optional[HlsSource]:
         info = ydl.extract_info(url, download=False)
     fmts = info.get("formats") or []
     hls = [f for f in fmts if str(f.get("protocol", "")).startswith("m3u8")]
-    video = sorted(((f.get("height") or 0, int((f.get("tbr") or 0) * 1000), f.get("vcodec"), f["url"])
-                    for f in hls if f.get("vcodec") not in (None, "none") and _ipad_h264(f, max_height)), key=lambda v: v[0])
+    video = sorted({(f.get("height") or 0, int((f.get("tbr") or 0) * 1000), f.get("vcodec"), f["url"])
+                    for f in hls if f.get("vcodec") not in (None, "none") and _ipad_h264(f, max_height)}, key=lambda v: v[0])
+    if len(video) > 1:
+        video = [v for v in video if v[0] >= 240] or video   # 144p isn't worth showing
     if not video:
         return None
     audio = [f for f in hls if f.get("vcodec") in (None, "none") and f.get("acodec") != "none"]
@@ -305,14 +307,25 @@ class HlsSession:
         self.src = src
         self.token = secrets.token_urlsafe(12)
         self.segments: Dict[str, list] = {}   # playlist name -> upstream segment URLs
+        self.last_variant: Optional[str] = None   # what the panel fetched last ("v2" → 720p …)
         self.sent_bytes = 0
         self.last_seen = 0.0
+
+    def height_of(self, name: Optional[str]) -> Optional[int]:
+        if name and name.startswith("v") and name[1:].isdigit() and int(name[1:]) < len(self.src.video):
+            return self.src.video[int(name[1:])][0] or None
+        return None
 
     def master(self) -> str:
         lines = ["#EXTM3U", "#EXT-X-VERSION:4"]
         if self.src.audio:
             lines.append('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac",NAME="Audio",DEFAULT=YES,AUTOSELECT=YES,URI="a.m3u8"')
-        for i, (h, bw, codecs, _u) in enumerate(self.src.video):
+        # iOS starts with the first variant: a middle one (≤ 480p), then it adapts
+        order = list(range(len(self.src.video)))
+        start = max((i for i in order if self.src.video[i][0] <= 480), default=0, key=lambda i: self.src.video[i][0])
+        order.remove(start)
+        for i in [start] + order:
+            h, bw, codecs, _u = self.src.video[i]
             attrs = [f"BANDWIDTH={bw or 800000}"]
             if codecs:
                 attrs.append(f'CODECS="{codecs},mp4a.40.2"')
@@ -385,6 +398,8 @@ class HlsProxy:
             else:
                 out.append(line)
         s.segments[name] = segs
+        if name != "a":
+            s.last_variant = name
         return web.Response(text="\n".join(out) + "\n", content_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
 
     async def _segment(self, request):
@@ -465,6 +480,7 @@ class PanelVideo:
             "duration": a.get("duration"), "position": a.get("position"), "position_at": a.get("position_at"),
             "kind": a.get("kind"), "error": a.get("error") or (stream.error if stream else None),
             "relayed_mb": round(sess.sent_bytes / 1e6, 1) if sess else None,
+            "quality": f"{sess.height_of(sess.last_variant)}p" if sess and sess.height_of(sess.last_variant) else None,
             "frames": stream.seq if stream else None,
         }
 

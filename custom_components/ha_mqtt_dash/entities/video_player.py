@@ -96,7 +96,7 @@ class PanelVideoPlayer(MediaPlayerEntity):
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
         st = self._st
-        keys = ("kind", "relayed_mb", "frames", "error")
+        keys = ("kind", "quality", "relayed_mb", "frames", "error")
         return {k: st.get(k) for k in keys if st.get(k) is not None}
 
     async def async_play_media(self, media_type: str, media_id: str, **kwargs: Any) -> None:
