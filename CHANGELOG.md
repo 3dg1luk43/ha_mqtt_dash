@@ -4,7 +4,7 @@ All notable changes to iPad MQTT Dashboard (integration, editor and the iPad app
 
 ---
 
-## 0.6.0 - Unreleased
+## 0.6.0 - 2026-10-31
 
 Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, and a kiosk you can leave.
 
