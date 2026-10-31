@@ -139,6 +139,16 @@ def test_no_answer_keeps_charging():
     assert "didn't answer" in care.status("kitchen")["reason"]
 
 
+def test_reporting_again_after_no_answer_ends_the_fail_safe():
+    bc, care, bridge, charger = _care()
+    care._last_wake_result["kitchen"] = "no answer"
+    bridge._telemetry["kitchen"]["battery"] = 85
+    care.note_report("kitchen")
+    _run_tasks(care)
+    assert care._last_wake_result["kitchen"] == "answered later"
+    assert charger["state"] == "off"
+
+
 def test_presence_pauses_battery_care():
     bc, care, bridge, charger = _care(presence=["person.a", "person.b"])
     care._others.update({"person.a": FakeState("not_home"), "person.b": FakeState("work")})

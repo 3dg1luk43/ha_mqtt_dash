@@ -88,3 +88,44 @@ def test_booster_restarts_on_a_seek_out_of_its_window():
     seg = asyncio.run(run())
     assert ab.split_packed(seg)[0] == ab.split_packed(originals[9])[0]
     assert 8 in fed and 5 not in fed[fed.index(8):]
+
+
+def test_a_crashing_ffmpeg_falls_back_quickly_then_turns_the_boost_off():
+    import time
+    originals = _packed_segments(1, -30.0) if shutil.which("ffmpeg") else [b""]
+
+    async def fetch(i):
+        return originals[0]
+
+    async def run():
+        b = ab.AudioBooster(fetch, 10, 6.0, ffmpeg=shutil.which("false"))
+        t = time.monotonic()
+        out = [await b.get(i) for i in range(ab.MAX_CRASHES)]
+        took = time.monotonic() - t
+        await b.close()
+        return out, took, b.failed
+
+    out, took, failed = asyncio.run(run())
+    assert out == [None] * ab.MAX_CRASHES and took < 10 and failed
+
+
+@needs_ffmpeg
+def test_a_paused_player_stops_ffmpeg_until_it_asks_again(monkeypatch):
+    monkeypatch.setattr(ab, "IDLE_STOP", 0.5)
+    originals = _packed_segments(60, -30.0)
+
+    async def fetch(i):
+        return originals[i]
+
+    async def run():
+        b = ab.AudioBooster(fetch, len(originals), 6.0)
+        first = await b.get(0)
+        await asyncio.sleep(1.5)
+        stopped = b._proc.returncode is not None
+        later = await b.get(5)
+        await b.close()
+        return first, stopped, later, b.crashes
+
+    first, stopped, later, crashes = asyncio.run(run())
+    assert first and later and stopped and crashes == 0
+    assert ab.split_packed(later)[0] == ab.split_packed(originals[5])[0]

@@ -110,3 +110,72 @@ def test_original_soundtrack_beats_auto_dubs():
     assert best["format_id"] == "234-10"          # original, and the AAC-LC variant of it
     plain = [{"format_id": "233"}, {"format_id": "234"}]   # single-language video
     assert sorted(plain, key=lambda f: vr._audio_rank(f, None), reverse=True)[0]["format_id"] == "234"
+
+
+def test_a_direct_master_playlist_offers_its_h264_variants():
+    master = """#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="en",DEFAULT=YES,URI="audio/en.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,CODECS="avc1.4d401e,mp4a.40.2",AUDIO="aud"
+360/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",AUDIO="aud"
+1080/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360,CODECS="hvc1.1.6.L93.B0",AUDIO="aud"
+/hevc/360.m3u8
+"""
+    src = vr.parse_master("https://cdn.example/live/master.m3u8", master)
+    assert src.video == [(360, 800000, "avc1.4d401e", "https://cdn.example/live/360/index.m3u8")]
+    assert src.audio == "https://cdn.example/live/audio/en.m3u8"
+    assert vr.parse_master("https://cdn.example/a.m3u8", "#EXTM3U\n#EXTINF:4,\nseg.ts\n") is None
+
+
+def test_a_stop_while_resolving_wins():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    resolving = asyncio.Event()
+
+    async def run():
+        release = asyncio.Event()
+
+        async def executor(fn, *args):
+            resolving.set()
+            await release.wait()
+            return vr.HlsSource(title="t", video=[(480, 1, "avc1.4D401F", "https://x/v.m3u8")], audio=None)
+
+        hass = SimpleNamespace(async_add_executor_job=executor)
+        bridge = SimpleNamespace(cfg={}, async_send_device_request=AsyncMock())
+        pv = vr.PanelVideo(hass, bridge, port=_free_port())
+        pv._changed = lambda d: None
+        pv._source_ip = AsyncMock(return_value="127.0.0.1")
+        play = asyncio.ensure_future(pv.async_play("kitchen", "https://youtu.be/x"))
+        await resolving.wait()
+        await pv.async_stop("kitchen")
+        release.set()
+        await play
+        assert "kitchen" not in pv.active
+        assert not (pv.server and pv.server.hls.sessions)
+        assert [c.args[1] for c in bridge.async_send_device_request.call_args_list] == ["stop_video"]
+        if pv.server:
+            await pv.server.stop()
+
+    asyncio.run(run())
+
+
+def test_a_failed_play_does_not_stay_loading():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    async def run():
+        async def executor(fn, *args):
+            return None
+        bridge = SimpleNamespace(cfg={}, async_send_device_request=AsyncMock())
+        pv = vr.PanelVideo(SimpleNamespace(async_add_executor_job=executor), bridge, port=_free_port())
+        pv._changed = lambda d: None
+        pv._source_ip = AsyncMock(return_value="127.0.0.1")
+        with pytest.raises(ValueError):
+            await pv.async_play("kitchen", "https://example.com/page")
+        assert pv.state("kitchen")["state"] == "error"
+        if pv.server:
+            await pv.server.stop()
+
+    asyncio.run(run())

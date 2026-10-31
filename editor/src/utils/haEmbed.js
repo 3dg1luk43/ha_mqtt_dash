@@ -50,6 +50,8 @@ const toEntity = (s) => ({
   brightness: s.attributes?.brightness,
 });
 
+let subscribed = false;
+
 export const useHaEntities = create((set, get) => ({
   entities: [],   // [{ id, name, domain, unit, state, brightness }]
   byId: {},
@@ -59,14 +61,17 @@ export const useHaEntities = create((set, get) => ({
       const states = EMBEDDED ? await ws({ type: 'get_states' }) : DEMO_STATES;
       const entities = states.map(toEntity).sort((a, b) => a.name.localeCompare(b.name));
       set({ entities, byId: Object.fromEntries(entities.map((e) => [e.id, e])), loaded: true });
-      if (EMBEDDED) {
+      if (EMBEDDED && !subscribed) {
+        subscribed = true;   // load() can run twice (re-mount): one subscription
         const conn = await connPromise;
         conn.subscribeMessage((ev) => {
           const ns = ev?.data?.new_state;
           if (!ns) return;
           const e = toEntity(ns);
-          const byId = { ...get().byId, [e.id]: e };
-          set({ byId });
+          const old = get().byId[e.id];
+          // Most events change attributes the previews don't show
+          if (old && old.state === e.state && old.brightness === e.brightness && old.name === e.name && old.unit === e.unit) return;
+          set({ byId: { ...get().byId, [e.id]: e } });
         }, { type: 'subscribe_events', event_type: 'state_changed' });
       }
     } catch {

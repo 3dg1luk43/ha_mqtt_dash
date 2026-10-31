@@ -11,7 +11,8 @@ continuously (no clicks at segment joins), a few segments ahead of the player;
 each boosted segment gets exactly as many frames as the original plus the
 original's ID3 tag, so the playlist stays YouTube's own (same timeline,
 seeking, durations). A jump (seek) restarts ffmpeg there after one warm-up
-segment. Anything unexpected falls back to the original audio.
+segment. A pause stops ffmpeg until playback resumes. Anything unexpected
+falls back to the original audio.
 """
 from __future__ import annotations
 
@@ -26,6 +27,8 @@ QUIET_BELOW = -17.0   # LUFS; louder videos pass through untouched
 TARGET = -13.0        # LUFS to raise quiet ones to
 MAX_GAIN = 15.0       # dB
 AHEAD = 3             # segments prepared ahead of the newest request
+IDLE_STOP = 60        # s without a request (paused): stop ffmpeg, restart on the next one
+MAX_CRASHES = 3       # ffmpeg exits mid-track this often: serve the original audio
 
 
 def gain_for(loudness: Optional[float]) -> float:
@@ -68,6 +71,14 @@ def split_packed(seg: bytes) -> Optional[tuple]:
     return head, frames
 
 
+async def _reap(proc) -> None:
+    """Collect a dead ffmpeg's broken stdin pipe (else asyncio logs "exception never retrieved")."""
+    try:
+        await asyncio.wait_for(proc.stdin.wait_closed(), 1)
+    except Exception:
+        pass
+
+
 # ── the booster ──────────────────────────────────────────────────────────────
 
 class AudioBooster:
@@ -84,6 +95,9 @@ class AudioBooster:
         self.next_feed = 0       # next upstream segment the worker feeds in
         self.failed = False
         self.finished = False    # the worker reached the end of the track
+        self.idle = False        # the worker was stopped for lack of requests
+        self.ended = False       # the running worker produces nothing more
+        self.crashes = 0
         self.boosted = 0         # segments served boosted (diagnostics)
         self._cond = asyncio.Condition()
         self._proc: Optional[asyncio.subprocess.Process] = None
@@ -108,7 +122,7 @@ class AudioBooster:
             try:
                 # A worker that finished without it (e.g. a tiny last segment merged into
                 # the one before): serve the original
-                await asyncio.wait_for(self._cond.wait_for(lambda: idx in self.done or self.failed or self.finished), 30)
+                await asyncio.wait_for(self._cond.wait_for(lambda: idx in self.done or self.failed or self.finished or self.ended), 30)
             except asyncio.TimeoutError:
                 _LOGGER.debug("audio boost: segment %s timed out", idx)
                 return None
@@ -120,7 +134,8 @@ class AudioBooster:
     async def _restart(self, k: int) -> None:
         await self._stop_worker()
         warm = max(0, k - 1)
-        self.start, self.next_feed, self.wanted, self.finished = k, warm, k, False
+        self.start, self.next_feed, self.wanted = k, warm, k
+        self.finished = self.idle = self.ended = False
         self.done = {i: d for i, d in self.done.items() if i >= k}
         try:
             self._proc = await asyncio.create_subprocess_exec(
@@ -146,7 +161,12 @@ class AudioBooster:
         try:
             while self.next_feed < self.count:
                 async with self._cond:
-                    await self._cond.wait_for(lambda: self.next_feed <= self.wanted + AHEAD)
+                    try:
+                        await asyncio.wait_for(self._cond.wait_for(lambda: self.next_feed <= self.wanted + AHEAD), IDLE_STOP)
+                    except asyncio.TimeoutError:
+                        self.idle = True
+                        proc.kill()
+                        return
                 i = self.next_feed
                 packed = split_packed(await self.fetch(i))
                 if packed is None:
@@ -184,12 +204,20 @@ class AudioBooster:
                     if len(frames) >= self.counts.get(seg, 1 << 30):
                         self._emit(seg, self.heads.get(seg, b"") + b"".join(frames))
                         seg, frames = seg + 1, []
-            if frames:
-                self._emit(seg, self.heads.get(seg, b"") + b"".join(frames))
             self.finished = self.next_feed >= self.count
+            if frames and self.finished:   # the track's last segment (a short one)
+                self._emit(seg, self.heads.get(seg, b"") + b"".join(frames))
+            await proc.wait()
+            await _reap(proc)
         except asyncio.CancelledError:
             return
-        await proc.wait()
+        if not self.finished and not self.idle:
+            self.crashes += 1
+            _LOGGER.debug("audio boost: ffmpeg exited mid-track (%s)", proc.returncode)
+            if self.crashes >= MAX_CRASHES:
+                _LOGGER.warning("audio boost off for this video: ffmpeg keeps failing")
+                self.failed = True
+        self.ended = True
         await self._notify()
 
     async def _stop_worker(self) -> None:
@@ -202,6 +230,8 @@ class AudioBooster:
                 await asyncio.wait_for(self._proc.wait(), 3)
             except (ProcessLookupError, asyncio.TimeoutError):
                 pass
+        if self._proc:
+            await _reap(self._proc)
         self._proc = None
 
     async def close(self) -> None:

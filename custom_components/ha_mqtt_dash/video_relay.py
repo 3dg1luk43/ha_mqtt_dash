@@ -19,6 +19,7 @@ import secrets
 import shutil
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+from urllib.parse import urljoin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -305,10 +306,50 @@ def _youtube_loudness(manifest_url: Optional[str], audio_url: Optional[str], hea
     return found
 
 
+def _hls_attrs(line: str) -> Dict[str, str]:
+    return {k: v.strip('"') for k, v in re.findall(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)', line.split(":", 1)[-1])}
+
+
+def parse_master(url: str, text: str, max_height: int = 720) -> Optional[HlsSource]:
+    """A direct link's master playlist: its H.264 variants up to max_height (+ its audio), None if not a master."""
+    lines = text.splitlines()
+    if not any(line.startswith("#EXT-X-STREAM-INF") for line in lines):
+        return None
+    audio_by_group: Dict[str, str] = {}
+    video, group = [], None
+    for i, line in enumerate(lines):
+        if line.startswith("#EXT-X-MEDIA") and "TYPE=AUDIO" in line:
+            a = _hls_attrs(line)
+            if a.get("URI") and (a.get("GROUP-ID") not in audio_by_group or a.get("DEFAULT") == "YES"):
+                audio_by_group[a.get("GROUP-ID", "")] = urljoin(url, a["URI"])
+        elif line.startswith("#EXT-X-STREAM-INF"):
+            uri = next((u for u in lines[i + 1:] if u and not u.startswith("#")), None)
+            a = _hls_attrs(line)
+            res = re.match(r"\d+x(\d+)", a.get("RESOLUTION", ""))
+            h = int(res.group(1)) if res else 0
+            codecs = [c.strip() for c in a.get("CODECS", "").split(",") if c.strip()]
+            vc = next((c for c in codecs if not c.startswith("mp4a")), "")
+            if not uri or (vc and not vc.startswith("avc1")) or h > max_height:
+                continue
+            video.append((h, int(a.get("BANDWIDTH") or 0), vc, urljoin(url, uri)))
+            group = group or a.get("AUDIO")
+    if not video:
+        return HlsSource(title=None, video=[], audio=None)
+    return HlsSource(title=None, video=sorted(set(video), key=lambda v: v[0]), audio=audio_by_group.get(group or ""))
+
+
 def resolve_hls(url: str, max_height: int = 720) -> Optional[HlsSource]:
     """Blocking: HLS variants the iPad decodes natively, or None (then use MJPEG)."""
     if url.lower().split("?")[0].endswith(".m3u8"):
-        return HlsSource(title=None, video=[(0, 0, "", url)], audio=None)
+        import urllib.request
+        try:
+            text = urllib.request.urlopen(url, timeout=15).read(1 << 20).decode("utf-8", "replace")
+        except Exception:
+            text = ""
+        master = parse_master(url, text, max_height)
+        if master is not None:
+            return master if master.video else None
+        return HlsSource(title=None, video=[(0, 0, "", url)], audio=None)   # a media playlist
     try:
         import yt_dlp  # type: ignore
     except ImportError:
@@ -349,7 +390,6 @@ class HlsSession:
         self.boost_db = 0.0                        # > 0: the audio rendition is made louder
         self.booster = None                        # audio_boost.AudioBooster, made on first use
         self.sent_bytes = 0
-        self.last_seen = 0.0
 
     def height_of(self, name: Optional[str]) -> Optional[int]:
         if name and name.startswith("v") and name[1:].isdigit() and int(name[1:]) < len(self.src.video):
@@ -412,7 +452,6 @@ class HlsProxy:
         s = self.sessions.get(request.match_info["token"])
         if not s:
             raise web.HTTPNotFound()
-        s.last_seen = asyncio.get_running_loop().time()
         return s
 
     async def _master(self, request):
@@ -428,12 +467,14 @@ class HlsProxy:
         if not up:
             raise web.HTTPNotFound()
         async with self._http().get(_raw_url(up), headers=s.src.headers) as r:
+            if r.status >= 400:   # e.g. the signed URL expired: not a playlist
+                _LOGGER.debug("hls playlist %s: upstream HTTP %s", name, r.status)
+                raise web.HTTPBadGateway()
             text = await r.text()
-        base = up.rsplit("/", 1)[0] + "/"
         out, segs = [], []
         for line in text.splitlines():
             if line and not line.startswith("#"):
-                segs.append(line if "://" in line else base + line)
+                segs.append(urljoin(up, line))
                 out.append(f"s/{name}/{len(segs) - 1}.ts")
             else:
                 out.append(line)
@@ -547,16 +588,29 @@ class PanelVideo:
         async_dispatcher_send(self.hass, SIGNAL_VIDEO_UPDATED, device_id)
 
     async def async_play(self, device_id: str, url: str, *, title: Optional[str] = None, start: float = 0.0) -> None:
-        import time as _t
         await self.async_stop(device_id, tell_panel=False)
         self.last_end.pop(device_id, None)
-        self.active[device_id] = {"url": url, "title": title or "Loading…", "state": "loading"}
+        gen = object()   # a stop or another play while this one resolves replaces it
+        self.active[device_id] = {"url": url, "title": title or "Loading…", "state": "loading", "gen": gen}
         self._changed(device_id)
+        try:
+            await self._play(device_id, url, title, start, gen)
+        except Exception as err:
+            if (self.active.get(device_id) or {}).get("gen") is gen:
+                self.active[device_id] = {"url": url, "title": title, "state": "error", "error": str(err) or type(err).__name__}
+                self._changed(device_id)
+            raise
+
+    async def _play(self, device_id: str, url: str, title: Optional[str], start: float, gen: object) -> None:
+        import time as _t
+        current = lambda: (self.active.get(device_id) or {}).get("gen") is gen  # noqa: E731
         try:
             hls = await self.hass.async_add_executor_job(resolve_hls, url)
         except Exception as err:
             hls = None
             _LOGGER.debug("video: no HLS for %s: %s", url, err)
+        if not current():
+            return
         server = await self._ensure_server()
         host = f"http://{await self._source_ip()}:{self.port}"
         if hls:
@@ -565,7 +619,6 @@ class PanelVideo:
             from .const import CONF_BOOST_QUIET
             if hls.audio and (self.bridge.cfg or {}).get(CONF_BOOST_QUIET, True):
                 sess.boost_db = gain_for(hls.loudness)
-            server.hls.sessions[sess.token] = sess
             entry = {"kind": "hls", "token": sess.token, "hls": sess, "title": title or hls.title or url,
                      "thumbnail": hls.thumbnail, "duration": hls.duration, "loudness": hls.loudness}
             panel_url = f"{host}/hls/{sess.token}/master.m3u8"
@@ -574,19 +627,24 @@ class PanelVideo:
             panel_url = url
         elif self.transcode:
             src = await self.hass.async_add_executor_job(resolve, url)
+            if not current():
+                return
             stream = VideoStream(src, start=start)
-            await stream.start()
-            server.add(stream)
             entry = {"kind": "mjpeg", "token": stream.token, "stream": stream, "title": title or src.title or url,
                      "thumbnail": src.thumbnail, "duration": src.duration}
             panel_url = f"{host}/video/{stream.token}.mjpeg"
             start = 0.0
         else:
-            self.active[device_id] = {"url": url, "title": title, "state": "error",
-                                      "error": "No stream the iPad can play without transcoding"}
-            self._changed(device_id)
-            raise ValueError("No stream the iPad can play without transcoding (H.264 HLS up to 480p, or a plain-http file)")
-        entry.update({"url": url, "state": "playing", "position": start, "position_at": _t.time()})
+            raise ValueError("No stream the iPad can play without transcoding (H.264 HLS up to 720p, or a plain-http file)")
+        if not current():
+            return
+        # Registered only now, together with the entry that owns it (async_stop removes both)
+        if entry["kind"] == "hls":
+            server.hls.sessions[sess.token] = sess
+        elif entry["kind"] == "mjpeg":
+            server.add(stream)
+            await stream.start()
+        entry.update({"url": url, "state": "playing", "position": start, "position_at": _t.time(), "gen": gen})
         self.active[device_id] = entry
         self._changed(device_id)
         payload = {"url": panel_url, "title": entry["title"]}
@@ -628,7 +686,9 @@ class PanelVideo:
             ev = _json.loads(msg.payload if isinstance(msg.payload, str) else msg.payload.decode())
         except Exception:
             return
-        state = ev.get("state") if isinstance(ev, dict) else None
+        if not isinstance(ev, dict):
+            return
+        state = ev.get("state")
         if state in ("ended", "closed", "error"):
             if state == "error":
                 _LOGGER.warning("video on %s: the panel could not play the stream", device_id)

@@ -159,6 +159,8 @@ class BatteryCare:
             self._last_wake_result[device_id] = "answered"
             self._restore[device_id] = bool(pend.get("was_on"))
             _LOGGER.debug("battery care %s: panel answered the charger wake", device_id)
+        elif self._last_wake_result.get(device_id) == "no answer":
+            self._last_wake_result[device_id] = "answered later"   # reports again: no longer "charge to be safe"
         if pend and pend.get("sleep_after"):
             # We turned the screen on only to read the battery: put it back.
             self.hass.async_create_task(self._send_request(device_id, "sleep"))
