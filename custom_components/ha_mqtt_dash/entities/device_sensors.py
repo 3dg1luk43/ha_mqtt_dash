@@ -19,7 +19,6 @@ class _BaseDeviceEntity(SensorEntity):
 
 
 class BatteryLevelSensor(_BaseDeviceEntity):
-    _attr_name = "Battery"
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_native_unit_of_measurement = "%"
 

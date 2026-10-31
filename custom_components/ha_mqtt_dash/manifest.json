@@ -20,5 +20,6 @@
     "ha_mqtt_dash"
   ],
   "requirements": [],
+  "single_config_entry": true,
   "version": "0.6.0"
 }

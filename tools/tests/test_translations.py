@@ -41,3 +41,23 @@ def test_description_placeholders_are_provided():
         provided = set(re.findall(r'"(\w+)":', body))
         used = set(re.findall(r"\{(\w+)\}", strings.get(step_id, {}).get("description", "")))
         assert used <= provided, f"{step_id}: placeholders {used - provided} not provided"
+
+
+def test_every_entity_translation_key_has_a_name():
+    names = {k for platform in _strings()["entity"].values() for k in platform}
+    used = set()
+    for path in list((COMP / "entities").glob("*.py")) + [COMP / "notify.py"]:
+        used |= set(re.findall(r'_attr_translation_key = "(\w+)"', path.read_text(encoding="utf-8")))
+    assert used and used <= names, f"entity names missing in strings.json: {used - names}"
+
+
+def test_services_yaml_and_strings_agree():
+    src = (COMP / "__init__.py").read_text(encoding="utf-8")
+    registered = set(re.findall(r'async_register\(DOMAIN, "(\w+)"', src))
+    yaml_text = (COMP / "services.yaml").read_text(encoding="utf-8")
+    in_yaml = set(re.findall(r"^(\w+):", yaml_text, re.M))
+    texts = _strings()["services"]
+    assert registered == in_yaml == set(texts), (registered, in_yaml, set(texts))
+    for svc, body in re.findall(r"^(\w+):\n((?:[ ]+.*\n?)*)", yaml_text, re.M):
+        fields = set(re.findall(r"^    (\w+):", body, re.M))
+        assert fields == set(texts[svc].get("fields", {})), f"{svc}: fields differ"

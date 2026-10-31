@@ -9,7 +9,7 @@ from typing import Optional, Callable
 
 class ChargingBinarySensor(BinarySensorEntity):
     _attr_has_entity_name = True
-    _attr_name = "Charging"
+    _attr_translation_key = "charging"
     _attr_device_class = BinarySensorDeviceClass.BATTERY_CHARGING
 
     def __init__(self, hass, entry, device_id: str) -> None:
@@ -39,7 +39,7 @@ class OnlineBinarySensor(BinarySensorEntity):
     """Binary sensor that reflects device MQTT LWT online/offline status."""
 
     _attr_has_entity_name = True
-    _attr_name = "Online"
+    _attr_translation_key = "online"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_should_poll = False
 

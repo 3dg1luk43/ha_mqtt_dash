@@ -54,7 +54,7 @@ def make_bridge(states=None, profiles=None):
     profiles = profiles if profiles is not None else sample_profiles()
     entry = MagicMock()
     entry.data = {}
-    entry.options = {"devices": [{"device_id": "kitchen", "profile": "kitchen"}], "profiles": profiles, "mirror_auto": True}
+    entry.options = {"devices": [{"device_id": "kitchen", "profile": "kitchen"}], "profiles": profiles}
     bridge = mb.MqttBridge(hass, entry)
     bridge.cfg = {"devices": entry.options["devices"], "profiles": profiles}
     return mb, bridge, hass, states

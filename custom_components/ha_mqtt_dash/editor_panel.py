@@ -2,8 +2,9 @@
 
 The profile editor's built files ship in ``editor/`` and are served at
 ``/ha_mqtt_dash_static/editor``. They're shown as an admin-only panel at
-``/mqttdash-editor`` *without a sidebar entry* (it's used rarely), linked from
-the integration options and each panel's device page.
+``/mqttdash-editor``, linked from the integration options and each panel's
+device page. The sidebar entry is off by default (it's used rarely) and can be
+switched on in the options.
 
 Embedded, the editor uses Home Assistant's own logged-in connection and talks
 to these admin-only WebSocket commands, so no OAuth, tokens or API-access
@@ -36,6 +37,9 @@ EDITOR_DIR = Path(__file__).parent / "editor"
 PANEL_JS = Path(__file__).parent / "frontend" / "mqttdash-editor-panel.js"
 PANEL_JS_URL = "/ha_mqtt_dash_static/panel/mqttdash-editor-panel.js"
 _DATA_KEY = f"{DOMAIN}_editor_registered"
+_SIDEBAR_KEY = f"{DOMAIN}_editor_sidebar"
+SIDEBAR_TITLE = "iPad Dashboards"
+SIDEBAR_ICON = "mdi:tablet-dashboard"
 
 # Profile limits (a profile is published retained to MQTT and parsed on an iPad 1)
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
@@ -108,8 +112,9 @@ def _bridge(hass: HomeAssistant):
     return None
 
 
-async def async_setup_editor(hass: HomeAssistant) -> None:
-    """Register static files + WebSocket commands once per HA run, and the panel."""
+async def async_setup_editor(hass: HomeAssistant, *, sidebar: bool = False) -> None:
+    """Register static files + WebSocket commands once per HA run, and the panel
+    (again when the sidebar option changes)."""
     if not hass.data.get(_DATA_KEY):
         hass.data[_DATA_KEY] = True
         websocket_api.async_register_command(hass, ws_devices)
@@ -124,29 +129,39 @@ async def async_setup_editor(hass: HomeAssistant) -> None:
         else:
             _LOGGER.warning("Dashboard editor files missing (%s); panel not available", EDITOR_DIR)
             hass.data[_DATA_KEY] = "no_files"
-    if hass.data.get(_DATA_KEY) is True:
-        # Custom panel (not the built-in "iframe" one): no HA toolbar, so the
-        # editor uses the full content area. No sidebar_title → not in the sidebar.
-        try:
-            version = int(PANEL_JS.stat().st_mtime)  # cache-bust the module on updates
-        except OSError:
-            version = 0
-        try:
-            await panel_custom.async_register_panel(
-                hass,
-                frontend_url_path=PANEL_URL,
-                webcomponent_name="mqttdash-editor-panel",
-                module_url=f"{PANEL_JS_URL}?v={version}",
-                embed_iframe=False,
-                require_admin=True,
-                config={"url": f"{STATIC_URL}/index.html?embedded=1"},
-            )
-        except ValueError:
-            pass  # already registered (entry reload)
+    if hass.data.get(_DATA_KEY) is not True:
+        return
+    if hass.data.get(_SIDEBAR_KEY) == sidebar and PANEL_URL in (hass.data.get(frontend.DATA_PANELS) or {}):
+        return  # already registered as wanted (entry reload)
+    async_remove_editor_panel(hass)
+    # Custom panel (not the built-in "iframe" one): no HA toolbar, so the
+    # editor uses the full content area. Without sidebar_title it isn't listed
+    # in the sidebar (default; reached from the options flow / device page).
+    try:
+        version = int(PANEL_JS.stat().st_mtime)  # cache-bust the module on updates
+    except OSError:
+        version = 0
+    extra = {"sidebar_title": SIDEBAR_TITLE, "sidebar_icon": SIDEBAR_ICON} if sidebar else {}
+    try:
+        await panel_custom.async_register_panel(
+            hass,
+            frontend_url_path=PANEL_URL,
+            webcomponent_name="mqttdash-editor-panel",
+            module_url=f"{PANEL_JS_URL}?v={version}",
+            embed_iframe=False,
+            require_admin=True,
+            config={"url": f"{STATIC_URL}/index.html?embedded=1"},
+            **extra,
+        )
+        hass.data[_SIDEBAR_KEY] = sidebar
+    except ValueError:
+        pass  # registered meanwhile
 
 
 @callback
 def async_remove_editor_panel(hass: HomeAssistant) -> None:
+    if PANEL_URL not in (hass.data.get(frontend.DATA_PANELS) or {}):
+        return
     try:
         frontend.async_remove_panel(hass, PANEL_URL)
     except Exception:  # pragma: no cover - panel may not exist

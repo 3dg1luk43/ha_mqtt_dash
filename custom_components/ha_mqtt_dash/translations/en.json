@@ -3,90 +3,157 @@
     "step": {
       "user": {
         "title": "iPad MQTT Dashboard",
-        "description": "Enter the device ID to onboard (a short name like 'kitchen_ipad'). A default profile with a clock will be created. Afterwards, design layouts in the dashboard editor (integration options → Open the dashboard editor).",
-        "data": {
-          "device_id": "Device ID"
-        }
+        "description": "Panels appear here on their own: in the iPad app's Settings enter your MQTT broker and a panel name (for example kitchen), and the panel registers when it connects. Then design its layout in the dashboard editor (integration options > Open the dashboard editor)."
       }
     },
     "abort": {
-      "single_instance_allowed": "Only a single instance is allowed."
+      "single_instance_allowed": "iPad MQTT Dashboard is already set up. Panels are added automatically when the app connects."
     }
   },
   "options": {
     "abort": {
-      "no_devices": "No devices are onboarded yet. Open the app so it registers, or add a device in the integration's initial setup.",
+      "no_devices": "No panel has connected yet. Open the app on the iPad; it registers when it connects to the broker.",
       "battery_saved": "Battery care settings saved.",
-      "not_loaded": "The integration isn't loaded; reload it and try again.",
-      "invalid_device_id": "Invalid device ID: use 1–64 letters, digits, hyphens or underscores."
-    },
-    "error": {
-      "invalid_json": "Invalid JSON. Please fix the profile and try again.",
-      "overlaps": "Overlapping widgets detected. Fix positions and submit again."
+      "not_loaded": "The integration isn't loaded; reload it and try again."
     },
     "step": {
       "init": {
-        "title": "Options",
-        "description": "Select a section",
+        "title": "iPad MQTT Dashboard",
         "menu_options": {
           "editor": "Open the dashboard editor",
-          "profiles_device": "Edit device profile (JSON)",
-          "devices_add": "Add device manually",
-          "mirror": "Select entities to mirror to MQTT",
-          "entity_list": "Entity reference",
-          "battery": "Battery care (charger control)"
-        }
-      },
-      "profiles_device": {
-        "title": "Device Profile",
-        "description": "Edit JSON for selected device.",
-        "data": {
-          "device_id": "Device",
-          "profile_json": "Profile JSON"
-        }
-      },
-      "devices_add": {
-        "title": "Add Device",
-        "description": "Create a device entry and empty profile.",
-        "data": {
-          "device_id": "Device ID"
-        }
-      },
-      "mirror": {
-        "title": "Mirror Entities",
-        "description": "Mirror HA entity states to MQTT statestream topics.",
-        "data": {
-          "mirror_auto": "Auto (derive entity list from profile widgets)",
-          "mirror_entities": "Manual entity list (used when Auto is off)"
-        }
-      },
-      "entity_list": {
-        "title": "Entity Reference",
-        "description": "Current mirror mode: {mirror_mode}\n\nEntities used in profile widgets:\n{profile_entities}\n\nManual mirror list:\n{manual_entities}\n\nAll registered HA entities — click the field below, then Ctrl+A and Ctrl+C to copy:",
-        "data": {
-          "all_entities": "All entities"
-        }
-      },
-      "battery": {
-        "title": "Battery care",
-        "description": "Choose the panel to configure.",
-        "data": {
-          "device_id": "Device"
-        }
-      },
-      "battery_device": {
-        "title": "Battery care — {device}",
-        "description": "Keeps an old iPad's battery between the start and stop levels by switching its charger plug, instead of charging 24/7. The panel reports its battery even with the screen off. If reports stop, the charger is turned on as a fail-safe.\n\nBattery now: {battery}% · status: {state}",
-        "data": {
-          "enabled": "Enable battery care",
-          "charger": "Charger plug (switch / light / input_boolean powering the charger)",
-          "start": "Start charging at",
-          "stop": "Stop charging at"
+          "battery": "Battery care"
         }
       },
       "editor": {
         "title": "Dashboard editor",
-        "description": "Design your panels' layouts in the editor, then press **Deploy** to send a profile to a panel.\n\n**[Open the dashboard editor]({url})**\n\nIt runs inside Home Assistant using your login (admin only) and isn't added to the sidebar. Bookmark it if you like, or reach it from here or from a panel's device page (Visit)."
+        "description": "Design your panels' layouts in the editor, then press **Deploy** to send a profile to a panel.\n\n**[Open the dashboard editor]({url})**\n\nIt runs inside Home Assistant using your login (admin only). It isn't in the sidebar unless you switch that on below; otherwise reach it from here or from a panel's device page (Visit).",
+        "data": {
+          "editor_sidebar": "Show the editor in the sidebar"
+        }
+      },
+      "battery": {
+        "title": "Battery care",
+        "description": "Pick the panel to set up.",
+        "data": {
+          "device_id": "Panel"
+        }
+      },
+      "battery_device": {
+        "title": "Battery care — {device}",
+        "description": "Keeps an old iPad's battery between the start and stop levels by switching its charger plug, instead of charging 24/7.\n\nReadings are asked for over MQTT, which keeps the screen off. Only a panel that doesn't answer is woken by switching the charger on, then put back to sleep (with the kiosk tweak installed, the chime is muted while it's locked). If it still doesn't answer, the charger stays on as a fail-safe.\n\nBattery now: {battery}% · status: {state}",
+        "data": {
+          "enabled": "Enable battery care",
+          "charger": "Charger plug (switch / light / input_boolean powering the charger)",
+          "start": "Start charging at",
+          "stop": "Stop charging at",
+          "presence": "Only while someone is home (optional: people / trackers)"
+        },
+        "data_description": {
+          "presence": "With people picked, battery care pauses while none of them is home: no checks, no wakes, charger left as it is."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "charging": {
+        "name": "Charging"
+      },
+      "online": {
+        "name": "Online",
+        "state_attributes": {
+          "screen": {
+            "name": "Screen",
+            "state": {
+              "awake": "Awake",
+              "asleep": "Asleep"
+            }
+          }
+        }
+      }
+    },
+    "button": {
+      "reload": {
+        "name": "Reload"
+      },
+      "wake_screen": {
+        "name": "Wake screen"
+      },
+      "check_battery": {
+        "name": "Check battery"
+      }
+    },
+    "number": {
+      "brightness": {
+        "name": "Brightness"
+      },
+      "screensaver_timeout": {
+        "name": "Screensaver"
+      },
+      "charge_start": {
+        "name": "Charge start level"
+      },
+      "charge_stop": {
+        "name": "Charge stop level"
+      }
+    },
+    "select": {
+      "orientation": {
+        "name": "Orientation",
+        "state": {
+          "auto": "Auto",
+          "portrait": "Portrait",
+          "landscape": "Landscape"
+        }
+      }
+    },
+    "sensor": {
+      "battery_care_status": {
+        "name": "Battery care status",
+        "state": {
+          "disabled": "Disabled",
+          "no_charger": "No charger picked",
+          "away": "Away (paused)",
+          "checking": "Checking",
+          "charging": "Charging",
+          "resting": "Resting",
+          "charger_unavailable": "Charger unavailable"
+        }
+      },
+      "last_contact": {
+        "name": "Last contact"
+      }
+    },
+    "switch": {
+      "keep_awake": {
+        "name": "Keep awake"
+      },
+      "battery_care": {
+        "name": "Battery care"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Reload panels",
+      "description": "Publishes every panel's layout again and makes the panels reload it."
+    },
+    "set_device_profile": {
+      "name": "Set panel layout",
+      "description": "Replaces a panel's layout (profile JSON, as exported from the dashboard editor) and reloads the panel.",
+      "fields": {
+        "device": {
+          "name": "Panel",
+          "description": "The iPad panel."
+        },
+        "device_id": {
+          "name": "Panel name",
+          "description": "Panel name as set in the app, instead of picking the device."
+        },
+        "profile": {
+          "name": "Layout",
+          "description": "Profile JSON from the editor's export."
+        }
       }
     }
   }

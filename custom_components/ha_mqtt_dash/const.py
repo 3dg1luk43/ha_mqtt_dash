@@ -3,13 +3,13 @@ DOMAIN = "ha_mqtt_dash"
 CONF_DEVICES = "devices"
 CONF_PROFILES = "profiles"
 
-CONF_MIRROR_ENTITIES = "mirror_entities"  # list[str]
-CONF_MIRROR_AUTO = "mirror_auto"  # bool — derive mirror list from profile entity refs
 CONF_PLACEHOLDER_ON_REMOVE = "placeholder_on_remove"  # bool
+CONF_EDITOR_SIDEBAR = "editor_sidebar"  # bool — show the dashboard editor in the sidebar
 
 
 # Dispatcher signal names
 SIGNAL_DEVICE_SETTINGS_UPDATED = f"{DOMAIN}_device_settings_updated"
+SIGNAL_LAST_CONTACT = f"{DOMAIN}_last_contact"
 
 # Fixed mqttdash namespace (replaces legacy 'ha/*' topics). User configuration of bases removed.
 FIXED_CONFIG_BASE = "mqttdash/config"
