@@ -7,7 +7,7 @@ import {
   mdiLightbulbOutline, mdiToggleSwitchOutline, mdiPalette, mdiGauge, mdiAccountOutline,
   mdiGestureTapButton, mdiFormatText, mdiClockOutline, mdiWeatherPartlyCloudy, mdiThermostat,
   mdiCctv, mdiPrinter3dNozzleOutline, mdiTimerOutline, mdiWeb, mdiChefHat, mdiPotSteamOutline,
-  mdiWashingMachine, mdiMusicNote, mdiBlindsHorizontal,
+  mdiWashingMachine, mdiMusicNote, mdiBlindsHorizontal, mdiTelevisionPlay,
 } from '@mdi/js';
 
 const TOGGLE_FORMAT = ['align', 'vAlign', 'textSize', 'onBgColor', 'onTextColor', 'offBgColor', 'offTextColor'];
@@ -81,6 +81,11 @@ export const WIDGET_TYPES = [
     type: 'camera', label: 'Camera', icon: mdiCctv, group: 'media', size: [2, 2],
     description: 'Camera entity relayed by Home Assistant, or a direct MJPEG/JPEG URL',
     domains: ['camera'], format: ['onBgColor', 'onTextColor', 'offBgColor', 'offTextColor'],
+  },
+  {
+    type: 'video', label: 'Video', icon: mdiTelevisionPlay, group: 'media', size: [4, 3],
+    description: 'Videos cast or played from Home Assistant; keeps playing on other pages',
+    domains: [], format: [],
   },
   {
     type: 'webpage', label: 'Web page', icon: mdiWeb, group: 'media', size: [2, 2],

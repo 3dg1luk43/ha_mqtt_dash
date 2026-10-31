@@ -1,5 +1,6 @@
 import { mdiCctv, mdiPrinter3dNozzleOutline, mdiWeb, mdiMusicNote, mdiRefresh, mdiCheck, mdiShuffleVariant, mdiRepeat, mdiVolumeHigh, mdiSpeaker } from '@mdi/js';
 import { typeDef as findType } from '../../data/widgetTypes';
+import { useHaEntities } from '../../utils/haEmbed';
 import { Icon } from '../ui';
 
 // Simulated values for each unit type — makes sensors look realistic in the preview
@@ -189,6 +190,7 @@ const lineClamp = (n) => ({ display: '-webkit-box', WebkitLineClamp: n, WebkitBo
  * tileW / tileH are the outer pixel dimensions of the tile (including any border).
  */
 export default function WidgetPreview({ widget, tileW, tileH }) {
+  const live = useHaEntities((s) => s.byId[widget.entity_id]);
   const { type, format = {} } = widget;
   const textColor = format.textColor || '#e0e0e0';
   const align = format.align || 'center';
@@ -211,66 +213,20 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
 
     // ---- stateful on/off buttons -----------------------------------------
     // Light: amber fill rises with brightness (left→right on wide tiles).
-    case 'light': {
-      const { m, pad } = cardMetrics(tileW, tileH);
-      const dimmable = widget.dimmable !== false;
-      const pct = dimmable ? 70 : 100;
-      const fill = format.onBgColor || ACCENT.amber;
-      const onText = format.onTextColor || '#2a1c05';
-      const wide = tileW > 1.3 * tileH;
-      const labelFs = format.textSize ? Number(format.textSize) : clamp(m * 0.13, 11, 18);
-      const icon = clamp(m * 0.24, 18, 40);
-      return (
-        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-          <div style={{
-            position: 'absolute', left: 0, bottom: 0, background: fill,
-            ...(wide ? { top: 0, width: `${pct}%` } : { right: 0, height: `${pct}%` }),
-          }} />
-          <div style={{
-            position: 'absolute', top: pad, left: pad, width: icon, height: icon, borderRadius: '50%',
-            background: 'rgba(0,0,0,0.22)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <BulbIcon size={icon * 0.62} color={fill} />
-          </div>
-          <div style={{ position: 'absolute', left: pad, right: pad, bottom: pad, color: onText, lineHeight: 1.2 }}>
-            <div style={{ fontSize: labelFs, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {displayLabel}
-            </div>
-            <div style={{ fontSize: Math.max(9, labelFs * 0.78), opacity: 0.75, whiteSpace: 'nowrap' }}>
-              {dimmable ? `On · ${pct}%` : 'On'}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
+    case 'light':
     case 'switch':
     case 'scene':
-    case 'button': {
-      const textSize = format.textSize
-        ? `${format.textSize}px`
-        : `${Math.max(13, Math.min(20, IH * 0.32))}px`;
-      const va = vAlign === 'top' ? 'flex-start' : vAlign === 'bottom' ? 'flex-end' : 'center';
-
-      return (
-        <div style={{ ...colStyle, alignItems: jc(align), justifyContent: va }}>
-          <span style={{
-            color: textColor, fontSize: textSize,
-            fontWeight: 'bold', textAlign: align, lineHeight: 1.25,
-          }}>
-            {displayLabel}
-          </span>
-        </div>
-      );
-    }
+    case 'button':
+      return <TogglePreview widget={widget} W={tileW} H={tileH} />;
 
     // ---- sensor / value / person -----------------------------------------
     case 'sensor':
     case 'value':
     case 'person': {
-      const unit = widget.unit || '';
+      const unit = widget.unit || live?.unit || '';
       const mockValue =
         widget.preview_value != null ? widget.preview_value
+        : live && live.state !== 'unavailable' && live.state !== 'unknown' ? live.state
         : type === 'person' ? 'home'
         : (MOCK_VALUES_BY_UNIT[unit] || '—');
       const baseSize = format.textSize
@@ -380,7 +336,8 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
       const { pad, hdrFs, iw, ih } = cardMetrics(tileW, tileH);
       const modes = (widget.modes?.length ? widget.modes : ['off', 'heat', 'cool', 'auto']).slice(0, 6);
       const stateFormats = widget.state_formats || {};
-      const active = modes.includes('heat') ? 'heat' : modes[0];
+      // The thermostat's real mode when known (as the panel shows it)
+      const active = live?.state && modes.includes(live.state) ? live.state : (modes.includes('heat') ? 'heat' : modes[0]);
       const activeColor = stateFormats[active]?.bgColor || MODE_COLORS[active] || ACCENT.orange;
       const gap = clamp(ih * 0.05, 3, 8);
       const pillH = clamp(ih * 0.17, 16, 30);
@@ -750,6 +707,14 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
     case 'mediaplayer':
       return <MediaPreview widget={widget} W={tileW} H={tileH} />;
 
+    case 'video':
+      return (
+        <div style={{ position: 'absolute', inset: 0, background: '#000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, color: '#5c6470', textAlign: 'center', padding: 12, boxSizing: 'border-box' }}>
+          <Icon path={findType('video').icon} size={Math.min(56, Math.min(tileW, tileH) * 0.3)} color="#5c6470" />
+          <div style={{ fontSize: 12, lineHeight: 1.35 }}>{widget.label || 'Video'}: what you cast or play from Home Assistant shows here</div>
+        </div>
+      );
+
     // ---- cover (blinds / shades / garage) --------------------------------
     case 'cover': {
       // Ordered granular items (cover_items). Fall back to expanding legacy
@@ -974,4 +939,56 @@ function MediaPreview({ widget, W, H }) {
       {!progress && <div style={{ position: 'absolute', left: 12, right: 12, bottom: 0, height: 3, borderRadius: 1.5, background: 'rgba(255,255,255,0.12)' }}><div style={{ width: '35%', height: '100%', background: '#f2f4f7', borderRadius: 1.5 }} /></div>}
     </div>
   );
+}
+
+
+// Light / switch / scene / button, with the app's colour rules
+// (DashboardViewController+Cards.m _buildToggleCard) and the entity's live
+// state: on → "On" colours (light: fill up to the brightness), off → "Off"
+// colours. Without a known state a light / switch shows as on.
+function TogglePreview({ widget, W, H }) {
+  const live = useHaEntities((s) => s.byId[widget.entity_id]);
+  const f = widget.format ?? {};
+  const type = widget.type;
+  const light = type === 'light';
+  const stateless = type === 'scene' || type === 'button';
+  const st = live?.state;
+  const on = !stateless && (st ? st === 'on' : true);
+  const unavailable = st === 'unavailable';
+  const onBg = f.onBgColor || (light ? '#FFB547' : '#34C77B');
+  const offBg = stateless ? (f.bgColor || '#1B1E25') : (f.offBgColor || f.bgColor || '#1B1E25');
+  const onText = f.onTextColor || (isLightColor(onBg) ? '#1A1C20' : '#F2F4F7');
+  const offText = f.offTextColor || f.textColor || '#F2F4F7';
+  const pct = light && on ? (live?.brightness != null ? Math.round((live.brightness / 255) * 100) : (st ? 100 : 70)) : 100;
+  const dimmable = light && widget.dimmable !== false;
+  const wide = W > H * 1.3;
+  const m = Math.min(W, H);
+  const pad = m < 125 ? 9 : 11;
+  const labelFs = f.textSize ? Number(f.textSize) : Math.max(13, Math.min(18, m * 0.13));
+  const icon = Math.max(18, Math.min(40, m * 0.24));
+  const centered = f.align === 'center';
+  const status = unavailable ? 'Unavailable' : stateless ? (type === 'scene' ? 'Scene' : 'Press') : on ? (dimmable ? `On · ${pct}%` : 'On') : 'Off';
+  const fg = on ? onText : offText;
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: on ? onBg : offBg, opacity: unavailable ? 0.5 : 1 }}>
+      {on && light && pct < 100 && (
+        <div style={{ position: 'absolute', background: 'rgba(0,0,0,0.30)', ...(wide ? { top: 0, bottom: 0, right: 0, width: `${100 - pct}%` } : { left: 0, right: 0, top: 0, height: `${100 - pct}%` }) }} />
+      )}
+      <div style={{ position: 'absolute', top: pad, left: centered ? '50%' : pad, transform: centered ? 'translateX(-50%)' : undefined, width: icon, height: icon, borderRadius: '50%', background: on ? 'rgba(0,0,0,0.16)' : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon path={findType(type)?.icon} size={icon * 0.6} color={fg} />
+      </div>
+      <div style={{ position: 'absolute', left: pad, right: pad, bottom: pad, color: fg, lineHeight: 1.2, textAlign: centered ? 'center' : 'left' }}>
+        <div style={{ fontSize: labelFs, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{widget.label || live?.name || widget.entity_id || findType(type)?.label}</div>
+        <div style={{ fontSize: Math.max(10, labelFs * 0.72), opacity: 0.75, whiteSpace: 'nowrap' }}>{status}</div>
+      </div>
+    </div>
+  );
+}
+
+function isLightColor(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const lum = 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255);
+  return lum > 150;
 }

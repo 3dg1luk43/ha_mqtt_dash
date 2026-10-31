@@ -24,6 +24,7 @@ const FIELDS = {
   sousvide: SousvideFields,
   appliance: ApplianceFields,
   mediaplayer: MediaPlayerFields,
+  video: VideoFields,
   cover: CoverFields,
 };
 
@@ -279,6 +280,16 @@ function ApplianceFields({ widget, onChange }) {
         <EntityPicker domains={['sensor']} value={widget.phase_entity} onChange={(v) => onChange({ phase_entity: v })} />
       </Field>
     </>
+  );
+}
+
+function VideoFields() {
+  return (
+    <p className="ed-hint">
+      Plays what Home Assistant sends to this panel: its Video media player (media_player.play_media with a YouTube or
+      video link) or a cast from the YouTube app. Starting a video shows this card's page; switching to another page keeps
+      it playing. The button on the card goes full screen. Without a Video card, videos open full screen.
+    </p>
   );
 }
 

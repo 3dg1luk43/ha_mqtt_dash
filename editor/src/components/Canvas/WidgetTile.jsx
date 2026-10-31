@@ -8,13 +8,11 @@ import { Icon } from '../ui';
 // iOS app default colors (matched from DashboardViewController.m)
 const CARD_BG = '#1c1f26';
 // Types drawn with the iPad card design: dark card, 12px corners.
-const CARD_TYPES = new Set(['light', 'climate', 'timer', 'camera', 'printer', 'printer3d', 'appliance', 'mediaplayer', 'sousvide', 'mealie']);
+const CARD_TYPES = new Set(['light', 'switch', 'scene', 'button', 'sensor', 'value', 'person', 'climate', 'timer', 'camera', 'printer', 'printer3d', 'appliance', 'mediaplayer', 'sousvide', 'mealie', 'video']);
 
+// Toggle cards paint their own on / off background (WidgetPreview)
 const TYPE_BG = {
-  light:  (fmt) => fmt.offBgColor || CARD_BG,
-  switch: (fmt) => fmt.offBgColor || '#333347',
-  scene:  (fmt) => fmt.offBgColor || '#333333',   // rgba(0.20, 0.20, 0.20)
-  button: (fmt) => fmt.bgColor    || '#594040',   // rgba(0.35, 0.25, 0.25)
+  light: () => CARD_BG, switch: () => CARD_BG, scene: () => CARD_BG, button: () => CARD_BG,
 };
 
 export default function WidgetTile({ widget, grid, isSelected, hasOverlap, onSelect, onResize, onDelete }) {

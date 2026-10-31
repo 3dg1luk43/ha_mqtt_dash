@@ -40,19 +40,35 @@ export const applyProfile = (deviceId, profile) => (EMBEDDED
   : new Promise((res) => { console.info('[demo] deploy', deviceId, profile); setTimeout(res, 400); }));
 
 // ── Home Assistant entities (names, units) for the pickers ──────────────────
-export const useHaEntities = create((set) => ({
-  entities: [],   // [{ id, name, domain, unit }]
+// Previews show what the panel shows: the entity's live state.
+const toEntity = (s) => ({
+  id: s.entity_id,
+  name: s.attributes?.friendly_name || s.entity_id,
+  domain: s.entity_id.split('.')[0],
+  unit: s.attributes?.unit_of_measurement,
+  state: s.state,
+  brightness: s.attributes?.brightness,
+});
+
+export const useHaEntities = create((set, get) => ({
+  entities: [],   // [{ id, name, domain, unit, state, brightness }]
+  byId: {},
   loaded: false,
   load: async () => {
     try {
       const states = EMBEDDED ? await ws({ type: 'get_states' }) : DEMO_STATES;
-      const entities = states.map((s) => ({
-        id: s.entity_id,
-        name: s.attributes?.friendly_name || s.entity_id,
-        domain: s.entity_id.split('.')[0],
-        unit: s.attributes?.unit_of_measurement,
-      })).sort((a, b) => a.name.localeCompare(b.name));
-      set({ entities, loaded: true });
+      const entities = states.map(toEntity).sort((a, b) => a.name.localeCompare(b.name));
+      set({ entities, byId: Object.fromEntries(entities.map((e) => [e.id, e])), loaded: true });
+      if (EMBEDDED) {
+        const conn = await connPromise;
+        conn.subscribeMessage((ev) => {
+          const ns = ev?.data?.new_state;
+          if (!ns) return;
+          const e = toEntity(ns);
+          const byId = { ...get().byId, [e.id]: e };
+          set({ byId });
+        }, { type: 'subscribe_events', event_type: 'state_changed' });
+      }
     } catch {
       set({ loaded: true });
     }
