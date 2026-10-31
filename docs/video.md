@@ -53,5 +53,3 @@ Home Assistant does this itself (a port of the receiver side of [yt-cast-receive
 - YouTube Music casting and "up next" autoplay aren't offered.
 - It re-implements YouTube's TV protocol; a change on YouTube's side can break it.
 - The panel's volume is the iPad's own; the sender's volume slider has no effect.
-
-`tools/cast_bridge` is the earlier standalone version (Node, run on another LAN machine against HA's API). Don't run it for a panel that HA already offers, or the panel is listed twice.
