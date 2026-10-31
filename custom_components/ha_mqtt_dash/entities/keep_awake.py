@@ -13,7 +13,7 @@ class KeepAwakeSwitch(SwitchEntity):
         self._entry = entry
         self._device_id = device_id
         self._attr_has_entity_name = True
-        self._attr_name = "Keep Awake"
+        self._attr_translation_key = "keep_awake"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)}, name=f"{device_id}")
         # Initial state
         self._is_on_cache = True

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict, List, Set
 import hashlib
 import time
@@ -12,7 +11,6 @@ from homeassistant.config_entries import ConfigEntry  # type: ignore
 from homeassistant.helpers.storage import Store  # type: ignore
 
 from .const import (
-    CONF_DEVICES,
     CONF_PROFILES,
     STORAGE_KEY,
     STORAGE_VERSION,
@@ -146,6 +144,19 @@ class StorageHelper:
         except Exception:
             _LOGGER.exception("store save failed (device_settings)")
         return dict(cur)
+
+    # YouTube cast receiver ids per panel (DIAL uuid, screen id, lounge device id)
+    def get_cast(self, device_id: str) -> Dict[str, Any]:
+        cur = (self._storage.get("cast") or {}).get(device_id)
+        return dict(cur) if isinstance(cur, dict) else {}
+
+    async def async_set_cast(self, device_id: str, data: Dict[str, Any]) -> None:
+        self._storage.setdefault("cast", {})[device_id] = dict(data)
+        try:
+            if self._store:
+                await self._store.async_save(self._storage)
+        except Exception:
+            _LOGGER.exception("store save failed (cast)")
 
     async def persist_profiles(self, profiles: Dict[str, Any]) -> Dict[str, Any]:
         """Persist profiles to Store and mirror into options. Returns the saved profiles copy."""

@@ -1,0 +1,73 @@
+name: Tests
+
+# Stubbed-HA unit tests (tools/tests), ruff, and the editor: lint, build, and a
+# check that the committed bundle in custom_components/ha_mqtt_dash/editor is
+# built from the current editor/ sources.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+      - run: pip install -r tools/requirements-test.txt
+      - run: python -m pytest
+
+  lint:
+    # Undefined names, unused imports, syntax errors. Not style.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - run: pip install -r tools/requirements-test.txt
+      - run: ruff check --isolated --select F,E9 custom_components tools
+      - run: bash -n install_ipad.sh && bash -n tools/deploy_to_ha.sh && bash -n tools/release_check.sh
+
+  editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+      - name: Committed bundle matches the editor sources
+        run: tools/build_editor.sh --check
+      - working-directory: editor
+        run: npm ci --no-audit --no-fund
+      - working-directory: editor
+        run: npm run lint
+      - working-directory: editor
+        run: npm run build:ha

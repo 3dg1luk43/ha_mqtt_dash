@@ -1,0 +1,4 @@
+# Pinned so a new release of a test dependency cannot turn CI red overnight.
+pytest==8.4.2
+ruff==0.13.3
+aiohttp==3.13.2

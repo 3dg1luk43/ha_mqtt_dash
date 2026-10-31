@@ -18,7 +18,7 @@ class _BaseBtn(ButtonEntity):
 
 
 class ReloadDeviceButton(_BaseBtn):
-    _attr_name = "Reload Device"
+    _attr_translation_key = "reload"
     _attr_icon = "mdi:refresh"
 
     @property

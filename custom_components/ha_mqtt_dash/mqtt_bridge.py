@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from typing import Any, Dict, List, Optional, Set
-from homeassistant.helpers.storage import Store  # type: ignore
+import re
+import time
+from typing import Any, Dict, List, Optional, Set, Tuple
 from homeassistant.core import HomeAssistant, Event  # type: ignore
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED  # type: ignore
 from homeassistant.config_entries import ConfigEntry  # type: ignore
 from homeassistant.components import mqtt  # type: ignore
-from homeassistant.const import EVENT_STATE_CHANGED, STATE_UNKNOWN, STATE_UNAVAILABLE  # type: ignore
+from homeassistant.const import STATE_UNKNOWN, STATE_UNAVAILABLE  # type: ignore
 from homeassistant.helpers.event import async_track_state_change_event  # type: ignore
 from homeassistant.helpers.event import async_track_time_interval  # type: ignore
 from homeassistant.helpers.event import async_call_later  # type: ignore
@@ -21,13 +21,16 @@ from homeassistant.util import dt as dt_util  # type: ignore
 from .const import (
     CONF_DEVICES,
     CONF_PROFILES,
-    CONF_MIRROR_ENTITIES,
-    CONF_MIRROR_AUTO,
     DOMAIN,
     SIGNAL_DEVICE_SETTINGS_UPDATED,
+    SIGNAL_LAST_CONTACT,
     FIXED_CONFIG_BASE, FIXED_DEVICE_BASE, FIXED_COMMAND_BASE, FIXED_STATESTREAM_BASE,
 )
 from .storage import StorageHelper
+from .media_relay import MediaRelay, art_topic, frame_topic
+from .battery_care import BatteryCare
+from .video_relay import PanelVideo
+from .cast_receiver import PanelCast
 
 # Fixed mqttdash namespace (replaces legacy 'ha/*' topics). User configuration of bases removed.
 _LOGGER = logging.getLogger(__name__)
@@ -57,16 +60,160 @@ _WIDGET_ENTITY_FIELDS = (
     "entity_id", "entity", "eid",
     # Printer widget
     "nozzle_entity", "bed_entity", "progress_entity", "status_entity",
+    "nozzle_target_entity", "bed_target_entity", "layer_entity", "total_layers_entity",
     # Sous vide widget
     "temp_entity", "target_entity",
     # Appliance / printer / sous vide shared
     "time_entity",
     # Generic program name sensor
     "program_entity",
+    # Appliance phase / sub-state
+    "phase_entity",
 )
 
 
-def _extract_entities_from_profiles(profiles: Dict[str, Any]) -> List[str]:
+# Top-level keys a profile itself uses. A single-key profile whose key is one of
+# these is a real profile, not a {"main_panel": {...}} wrapper to unwrap.
+_PROFILE_KEYS = ("ui", "widgets", "pages", "grid", "layout", "dashboard", "device", "banner", "topics")
+
+_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+
+
+def _valid_device_id(v: Any) -> bool:
+    """Device ids become MQTT topic levels: no wildcards, slashes or blanks."""
+    return isinstance(v, str) and bool(_DEVICE_ID_RE.match(v))
+
+
+# Panel settings owned by HA entities and published on mqttdash/dev/<id>/settings
+SETTINGS_KEYS = ("brightness", "keep_awake", "orientation", "screensaver_timeout")
+
+
+def placeholder_profile(device_id: str) -> Dict[str, Any]:
+    """Shown on a panel that has no layout yet (built at publish time, never stored)."""
+    return {"ui": {
+        "grid": {"columns": 4, "widget_dimensions": [240, 180], "widget_margins": [8, 8]},
+        "widgets": [{
+            "id": "setup", "type": "label", "label": "No layout yet",
+            "text": (f"This panel (\"{device_id}\") has no layout yet.\n\n"
+                     "In Home Assistant open Settings > Devices & services > iPad MQTT Dashboard > "
+                     "Configure > Open the dashboard editor, design a layout for this panel and press Deploy."),
+            "x": 0, "y": 0, "w": 4, "h": 2, "format": {"wrap": True, "textSize": 22},
+        }],
+    }}
+
+
+_MEDIA_SET_ACTIONS = ("volume_set", "volume_mute", "select_source", "shuffle_set", "repeat_set")
+
+
+def _media_service_data(action: str, cmd: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validated service data for the media player's own controls (None = reject)."""
+    try:
+        if action == "volume_set":
+            return {"volume_level": max(0.0, min(1.0, float(cmd.get("volume_level"))))}
+        if action == "volume_mute":
+            return {"is_volume_muted": bool(cmd.get("is_volume_muted"))}
+        if action == "shuffle_set":
+            return {"shuffle": bool(cmd.get("shuffle"))}
+        if action == "repeat_set":
+            rep = cmd.get("repeat")
+            return {"repeat": rep} if rep in ("off", "all", "one") else None
+        if action == "select_source":
+            src = cmd.get("source")
+            return {"source": src.strip()} if isinstance(src, str) and src.strip() and len(src) <= 200 else None
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _attr_str(v: Any) -> str:
+    """Encode an attribute value for the statestream topics.
+
+    Scalars stay as plain text; lists/dicts become JSON (the old str() produced
+    Python reprs like "['onoff']"); datetimes become ISO 8601; None becomes "".
+    """
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if hasattr(v, "isoformat"):
+        try:
+            return v.isoformat()
+        except Exception:
+            pass
+    if isinstance(v, (list, tuple, set, dict)):
+        try:
+            return json.dumps(list(v) if isinstance(v, (tuple, set)) else v, ensure_ascii=False, default=str)
+        except Exception:
+            pass
+    return str(v)
+
+
+def _appliance_siblings(hass: Optional[HomeAssistant], w: Dict[str, Any]) -> Dict[str, str]:
+    """Infer progress/phase entities for washdata-style appliances.
+
+    `sensor.<x>_time_remaining` usually has `sensor.<x>_progress` and
+    `sensor.<x>_current_phase` siblings; use them when the profile doesn't name
+    them explicitly (and only if they actually exist).
+    """
+    out: Dict[str, str] = {}
+    t = w.get("time_entity")
+    if hass is None or not isinstance(t, str) or not t.endswith("_time_remaining"):
+        return out
+    prefix = t[: -len("_time_remaining")]
+    for key, suffix in (("progress_entity", "_progress"), ("phase_entity", "_current_phase")):
+        if not w.get(key) and hass.states.get(prefix + suffix) is not None:
+            out[key] = prefix + suffix
+    return out
+
+
+def _iter_profile_widgets(profiles: Dict[str, Any]):
+    """Yield every widget dict across profiles (flat widgets, ui.widgets, pages)."""
+    def _from(src: Any):
+        if not isinstance(src, dict):
+            return
+        for w in src.get("widgets") or []:
+            if isinstance(w, dict):
+                yield w
+        for page in src.get("pages") or []:
+            yield from _from(page)
+    for prof in (profiles or {}).values():
+        if not isinstance(prof, dict):
+            continue
+        if len(prof) == 1 and next(iter(prof)) not in _PROFILE_KEYS:
+            only = next(iter(prof.values()))
+            if isinstance(only, dict) and any(k in only for k in ("widgets", "ui", "pages", "layout", "dashboard")):
+                prof = only
+        yield from _from(prof)
+        for key in ("ui", "dashboard"):
+            yield from _from(prof.get(key))
+
+
+def _relay_entities(profiles: Dict[str, Any]) -> Tuple[Set[str], Set[str]]:
+    """(art entities, camera entities) the media relay should serve."""
+    art: Set[str] = set()
+    cams: Set[str] = set()
+    for w in _iter_profile_widgets(profiles):
+        wtype = str(w.get("type") or "").lower()
+        if wtype == "mediaplayer" and w.get("show_art") is not False:
+            ent = w.get("entity_id")
+            if isinstance(ent, str) and ent.startswith("media_player."):
+                art.add(ent.strip().lower())
+        elif wtype in ("printer", "printer3d"):
+            ent = w.get("preview_entity")
+            if isinstance(ent, str) and ent.startswith("image."):
+                art.add(ent.strip().lower())
+        elif wtype == "camera":
+            ent = w.get("camera_entity")
+            if isinstance(ent, str) and ent.startswith("camera."):
+                cams.add(ent.strip().lower())
+    return art, cams
+
+
+def _extract_entities_from_profiles(profiles: Dict[str, Any], hass: Optional[HomeAssistant] = None) -> List[str]:
     """Return sorted unique entity IDs referenced across all profile widget and layout definitions."""
     entities: set = set()
 
@@ -78,6 +225,9 @@ def _extract_entities_from_profiles(profiles: Dict[str, Any]) -> List[str]:
             v = w.get(field)
             if isinstance(v, str) and "." in v:
                 entities.add(v.strip().lower())
+        if str(w.get("type") or "").lower() == "appliance":
+            for v in _appliance_siblings(hass, w).values():
+                entities.add(v)
         # Camera overlay button entity
         ob = w.get("overlay_button")
         if isinstance(ob, dict):
@@ -112,7 +262,7 @@ def _extract_entities_from_profiles(profiles: Dict[str, Any]) -> List[str]:
         if not isinstance(prof, dict):
             continue
         # Unwrap single-key wrapper (e.g. {"main_panel": {...}})
-        if len(prof) == 1:
+        if len(prof) == 1 and next(iter(prof)) not in _PROFILE_KEYS:
             only = next(iter(prof.values()))
             if isinstance(only, dict) and any(k in only for k in ("widgets", "ui", "pages", "layout", "dashboard")):
                 prof = only
@@ -146,13 +296,11 @@ class MqttBridge:
         self._mirror_unsub: Optional[Any] = None
 
         # Mirror tracking
-        self._mirror_wanted: List[str] = []  # effective entity list (auto-derived or manual)
-        if self.cfg.get(CONF_MIRROR_AUTO):
-            self._last_mirror_set = set(_extract_entities_from_profiles(
-                dict(self.cfg.get(CONF_PROFILES, {}) or {})
-            ))
-        else:
-            self._last_mirror_set = set(self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])
+        # Entities whose state is mirrored to MQTT: always the ones the profiles use
+        self._mirror_wanted: List[str] = []
+        self._last_mirror_set = set(_extract_entities_from_profiles(
+            dict(self.cfg.get(CONF_PROFILES, {}) or {}), hass
+        ))
         # Track last-published state and attributes per entity for proper retained dedupe/purge
         # _last_state["domain.object"] = "last_state_str"
         self._last_state = {}
@@ -179,10 +327,22 @@ class MqttBridge:
         self._storage = {"profiles": {}, "device_settings": {}}
         self._in_options_migration = False
         self._setup_complete = False
+        # Entities a device may command: those that received a command_topic in a
+        # published config (plus camera overlay buttons). Anything else on
+        # mqttdash/cmd/<entity> is ignored so a LAN MQTT client can't drive
+        # arbitrary HA entities through the dashboard bridge.
+        self._commandable: Set[str] = set()
+        # Album art / camera frame relay (see media_relay.py)
+        self._relay = MediaRelay(hass)
+        self.video = PanelVideo(hass, self)
+        self.cast = PanelCast(hass, self)
+        self.battery = BatteryCare(hass, self)
+        self._last_snapshot_mono = 0.0
+        # Last time each panel itself sent anything (for the "Last contact" sensor)
+        self.last_contact: Dict[str, Dict[str, Any]] = {}
 
     def schedule_republish_reload(self, reason: str = "") -> None:
         """Debounce multiple rapid requests to republish configs & reload all devices."""
-        import time
         self._republish_reload_pending = True
         # If a timer already scheduled, let it fire
         if self._republish_reload_handle is not None:
@@ -226,7 +386,7 @@ class MqttBridge:
                 )
             except Exception:
                 _LOGGER.exception("republish_reload: cfg refresh failed")
-            devices: List[Dict[str, Any]] = list(self.cfg.get(CONF_DEVICES, []) or [])
+            devices: List[Dict[str, Any]] = [dict(d) for d in (self.cfg.get(CONF_DEVICES, []) or []) if isinstance(d, dict)]
                 # First: send reload to devices (non-retained) so they clear and expect a new config
             for d in devices:
                 did = (d.get("device_id") or "").strip()
@@ -261,6 +421,10 @@ class MqttBridge:
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/request", self._on_device_request))
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/hello", self._on_device_hello))
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/telemetry/#", self._on_device_telemetry))
+        self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/status", self._on_device_status))
+        await self._relay.async_setup()
+        await self.video.async_setup()
+        await self.battery.async_setup()
         # Periodic freshness heartbeat so clients can detect a stuck backend and
         # auto-reset their connection (every HEARTBEAT_INTERVAL seconds).
         self._unsubs.append(
@@ -310,11 +474,17 @@ class MqttBridge:
         await self.async_publish_all_configs()
         # Subscribe to mirror without snapshot yet; we'll publish a single snapshot on HA started
         await self._maybe_start_mirror(publish_snapshot=False)
+        # YouTube cast receivers (needs the Store loaded for their pairing ids)
+        try:
+            await self.cast.async_setup()
+        except Exception:
+            _LOGGER.exception("youtube cast setup failed")
         # Re-enable options update handling after initial publish
         self._in_options_migration = False
         self._setup_complete = True
         # After HA startup, publish a full snapshot to ensure devices get initial states
         async def _on_started(_event):
+            self._started_unsub = None
             try:
                 _LOGGER.debug("mqtt_bridge: HA started -> refreshing Store and publishing configs")
                 # Reload Store to ensure final state after startup
@@ -343,77 +513,14 @@ class MqttBridge:
                 await self.async_publish_snapshot()
             except Exception:
                 _LOGGER.exception("startup: initial publish failed")
-        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
+        if self.hass.is_running:
+            # Entry (re)loaded after startup: STARTED already fired
+            self.hass.async_create_task(_on_started(None))
+        else:
+            self._started_unsub = self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
 
         # Removed periodic device pings to reduce CPU/network churn. Devices publish telemetry
         # on change and on connect; snapshots remain on-demand or at startup.
-
-    async def async_dump_store(self, publish: bool = False, topic: Optional[str] = None) -> None:
-        """Log current HA Store contents (profiles and device_settings).
-        If publish is True, also publish the JSON to an MQTT topic.
-        """
-        try:
-            data = dict(self._storage_helper.storage or {})
-        except Exception:
-            data = {"profiles": {}, "device_settings": {}}
-        profiles = data.get("profiles") or {}
-        dev_settings = data.get("device_settings") or {}
-        pkeys = list(profiles.keys()) if isinstance(profiles, dict) else []
-        dkeys = list(dev_settings.keys()) if isinstance(dev_settings, dict) else []
-        _LOGGER.info(
-            "dump_store: profiles=%d keys=%s device_settings=%d device_ids=%s",
-            (len(pkeys) if isinstance(pkeys, list) else 0), pkeys, (len(dkeys) if isinstance(dkeys, list) else 0), dkeys,
-        )
-        # Pretty JSON (truncate in logs); full content if publishing
-        try:
-            pretty = json.dumps(data, indent=2, ensure_ascii=False)
-        except Exception:
-            pretty = str(data)
-        max_log = 20000
-        if len(pretty) > max_log:
-            _LOGGER.info("dump_store (truncated): %s... (%d bytes)", pretty[:max_log], len(pretty))
-        else:
-            _LOGGER.info("dump_store: %s", pretty)
-        if publish:
-            try:
-                t = topic or f"mqttdash/debug/{self.entry.entry_id}/store_dump"
-                await mqtt.async_publish(self.hass, t, pretty, qos=0, retain=False)
-                _LOGGER.info("dump_store: published to %s", t)
-            except Exception:
-                _LOGGER.exception("dump_store: publish failed")
-
-    async def async_dump_runtime_cfg(self, publish: bool = False, topic: Optional[str] = None) -> None:
-        """Log current merged runtime configuration (self.cfg). Optionally publish as JSON."""
-        try:
-            cfg_now = dict(self.cfg or {})
-        except Exception:
-            cfg_now = {}
-        # Summaries
-        try:
-            devices = list(cfg_now.get(CONF_DEVICES, []) or [])
-            profiles = dict(cfg_now.get(CONF_PROFILES, {}) or {})
-            _LOGGER.info(
-                "dump_runtime_cfg: devices=%d profiles=%d keys=%s",
-                len(devices), len(profiles), list(profiles.keys()),
-            )
-        except Exception:
-            pass
-        try:
-            pretty = json.dumps(cfg_now, indent=2, ensure_ascii=False)
-        except Exception:
-            pretty = str(cfg_now)
-        max_log = 20000
-        if len(pretty) > max_log:
-            _LOGGER.info("dump_runtime_cfg (truncated): %s... (%d bytes)", pretty[:max_log], len(pretty))
-        else:
-            _LOGGER.info("dump_runtime_cfg: %s", pretty)
-        if publish:
-            try:
-                t = topic or f"mqttdash/debug/{self.entry.entry_id}/runtime_cfg"
-                await mqtt.async_publish(self.hass, t, pretty, qos=0, retain=False)
-                _LOGGER.info("dump_runtime_cfg: published to %s", t)
-            except Exception:
-                _LOGGER.exception("dump_runtime_cfg: publish failed")
 
     async def async_send_notification(self, device_id: str, message: str, title: Optional[str] = None) -> None:
         """Publish a notification to the device's notify topic."""
@@ -444,6 +551,27 @@ class MqttBridge:
         return
 
     async def async_unload(self) -> None:
+        for attr in ("_republish_reload_handle", "_entry_reload_handle", "_started_unsub"):
+            h = getattr(self, attr, None)
+            if h:
+                try:
+                    h()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+        try:
+            await self.battery.async_unload()
+        except Exception:
+            _LOGGER.debug("battery care unload failed", exc_info=True)
+        try:
+            await self.cast.async_unload()
+        except Exception:
+            _LOGGER.debug("youtube cast unload failed", exc_info=True)
+        try:
+            await self._relay.async_unload()
+            await self.video.async_unload()
+        except Exception:
+            _LOGGER.debug("relay unload failed", exc_info=True)
         for u in self._unsubs:
             try: u()
             except Exception: pass
@@ -483,18 +611,13 @@ class MqttBridge:
             list((updated_entry.data or {}).keys()), list((updated_entry.options or {}).keys()),
         )
         _LOGGER.debug(
-            "mqtt_bridge.options_updated: devices=%d profiles=%d mirror=%d",
+            "mqtt_bridge.options_updated: devices=%d profiles=%d",
             len(self.cfg.get(CONF_DEVICES, []) or []),
             len((self.cfg.get(CONF_PROFILES, {}) or {}).keys()),
-            len(self.cfg.get(CONF_MIRROR_ENTITIES, []) or []),
         )
 
-        if self.cfg.get(CONF_MIRROR_AUTO):
-            new_mirror = set(_extract_entities_from_profiles(dict(self.cfg.get(CONF_PROFILES, {}) or {})))
-        else:
-            new_mirror = set(self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])
+        new_mirror = set(_extract_entities_from_profiles(dict(self.cfg.get(CONF_PROFILES, {}) or {}), self.hass))
         removed_mirror = self._last_mirror_set - new_mirror
-        added_mirror = new_mirror - self._last_mirror_set
         if removed_mirror:
             await self._purge_mirror_entities(removed_mirror)
         self._last_mirror_set = new_mirror
@@ -515,9 +638,15 @@ class MqttBridge:
         # Cleanup unused profiles to avoid stale/unreferenced keys lingering
         try:
             # Use helper to prune unused profiles in Store and mirror to options
+            # Only drop profiles of devices that were just removed: a profile
+            # pushed for a device that hasn't onboarded yet must survive.
             profs = dict(self._storage_helper.storage.get("profiles") or {})
-            devs = list(self.cfg.get(CONF_DEVICES, []) or [])
-            remaining = await self._storage_helper.prune_unused_profiles(profs, devs)
+            if removed_devices and any(d in profs for d in removed_devices):
+                keep_profs = {k: v for k, v in profs.items() if k not in removed_devices}
+                await self._storage_helper.persist_profiles(keep_profs)
+                remaining = keep_profs
+            else:
+                remaining = profs
             # Update local caches
             self._storage = dict(self._storage_helper.storage)
             # Mirror newest Store profiles back to options for UI, without triggering loops
@@ -541,6 +670,11 @@ class MqttBridge:
         # Trigger immediate republish using the refreshed cfg
         self._republish_reload_pending = True
         await self._do_republish_reload("options_updated")
+        # Casting option or panel list may have changed
+        try:
+            await self.cast.async_sync()
+        except Exception:
+            _LOGGER.exception("youtube cast update failed")
 
     # ---------- retained config ----------
     async def _publish_heartbeats(self, now=None) -> None:
@@ -566,9 +700,14 @@ class MqttBridge:
             device_id = (dev.get("device_id") or "").strip()
             if not device_id:
                 continue
-            await mqtt.async_publish(
-                self.hass, f"{FIXED_DEVICE_BASE}/{device_id}/heartbeat", payload, qos=0, retain=True
-            )
+            if not _valid_device_id(device_id):
+                continue
+            try:
+                await mqtt.async_publish(
+                    self.hass, f"{FIXED_DEVICE_BASE}/{device_id}/heartbeat", payload, qos=0, retain=True
+                )
+            except Exception:
+                _LOGGER.debug("heartbeat publish failed for %s", device_id, exc_info=True)
 
     async def async_publish_all_configs(self) -> None:
         # Use latest merged in-memory config (self.cfg) so we include any disk-loaded profiles
@@ -577,11 +716,21 @@ class MqttBridge:
         base_cfg = FIXED_CONFIG_BASE
         devices: List[Dict[str, Any]] = list(cfg_now.get(CONF_DEVICES, []) or [])
         _LOGGER.debug("publishing configs: %d device(s) to fixed base %s", len(devices), base_cfg)
+        commandable: Set[str] = set()
         for dev in devices:
             device_id = (dev.get("device_id") or "").strip()
-            if not device_id:
+            if not _valid_device_id(device_id):
+                if device_id:
+                    _LOGGER.warning("skipping device with invalid id %r", device_id)
                 continue
             doc = self._build_config_for_device(dev, cfg_now)
+            ui = doc.get("ui") or {}
+            for w in list(ui.get("widgets") or []) + [pw for pg in (ui.get("pages") or []) if isinstance(pg, dict) for pw in (pg.get("widgets") or [])]:
+                if w.get("command_topic") and w.get("entity_id"):
+                    commandable.add(str(w["entity_id"]).lower())
+                ov = w.get("overlay") or {}
+                if ov.get("command_topic") and ov.get("entity_id"):
+                    commandable.add(str(ov["entity_id"]).lower())
             try:
                 payload = json.dumps(doc, separators=(",", ":"))
             except Exception as ex:
@@ -594,26 +743,12 @@ class MqttBridge:
                 phash = ""
             topic = f"{base_cfg}/{device_id}/config"
             _LOGGER.debug("mqtt_bridge.publish_config: %s bytes=%d hash=%s", topic, len(payload), phash[:12])
-            await mqtt.async_publish(self.hass, f"{base_cfg}/{device_id}/config", payload, qos=0, retain=True)
-
-    async def async_dump_device_config(self, device_id: str, publish: bool = False, topic: Optional[str] = None) -> None:
-        """Build and log the exact config JSON for a single device; optionally publish it."""
-        try:
-            cfg_now: Dict[str, Any] = dict(self.cfg or {})
-            devs: List[Dict[str, Any]] = list(cfg_now.get(CONF_DEVICES, []) or [])
-            dev = next((d for d in devs if (d.get("device_id") or "").strip() == device_id.strip()), None)
-            if not dev:
-                _LOGGER.warning("dump_device_config: device %s not found in devices list", device_id)
-                return
-            doc = self._build_config_for_device(dev, cfg_now)
-            pretty = json.dumps(doc, indent=2, ensure_ascii=False)
-            _LOGGER.info("dump_device_config(%s): %s", device_id, pretty)
-            if publish:
-                t = topic or f"mqttdash/debug/{device_id}/config"
-                await mqtt.async_publish(self.hass, t, pretty, qos=0, retain=False)
-                _LOGGER.info("dump_device_config: published to %s", t)
-        except Exception:
-            _LOGGER.exception("dump_device_config failed for %s", device_id)
+            try:
+                await mqtt.async_publish(self.hass, topic, payload, qos=0, retain=True)
+            except Exception:
+                # One bad device must not stop the others from getting a config
+                _LOGGER.exception("publish_config failed for %s", device_id)
+        self._commandable = commandable
 
     def _build_config_for_device(self, dev: Dict[str, Any], cfg_now: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         device_id = dev.get("device_id") or ""
@@ -630,38 +765,22 @@ class MqttBridge:
             )
         except Exception:
             pass
-        # Harden: if no profile assigned but exactly one profile exists, auto-assign it
-        if not prof and len(profiles) == 1:
-            try:
-                only_name, only_prof = next(iter(profiles.items()))
-                prof = only_prof
-                _LOGGER.debug("auto-assigning lone profile '%s' to %s", only_name, device_id)
-            except Exception:
-                pass
         # Or use a profile named "default" if present
         if not prof and "default" in profiles:
             prof = profiles.get("default")
         base_dev = FIXED_DEVICE_BASE
 
         if not prof:
-            _LOGGER.debug("build_config: no profile -> publishing unassigned placeholder for %s", device_id)
-            return {
-                "device_id": device_id,
-                # Device settings are not part of profile config anymore; app receives only UI + topics
-                "ui": { "widgets": [], "banner": f"unassigned: set profile in HA for {device_id}" },
-                "topics": {
-                    "settings": f"{base_dev}/{device_id}/settings",
-                    "hello":    f"{base_dev}/{device_id}/hello",
-                    "status":   f"{base_dev}/{device_id}/status",
-                },
-            }
+            # Not stored: shown until a layout is deployed from the editor
+            _LOGGER.debug("build_config: no profile for %s -> setup placeholder", device_id)
+            prof = placeholder_profile(device_id)
 
         # Normalize profile -> app config schema expected by iOS client
         # App expects: { device_id, device:{...}, ui:{ widgets:[], grid?, ... }, topics:{...} }
         raw = dict(prof)
         # If profile is wrapped in a single top-level key (e.g., {"main_panel": {...}}), unwrap it
         try:
-            if isinstance(raw, dict) and len(raw.keys()) == 1:
+            if isinstance(raw, dict) and len(raw.keys()) == 1 and next(iter(raw)) not in _PROFILE_KEYS:
                 only_key = next(iter(raw.keys()))
                 inner = raw.get(only_key)
                 # Heuristic: if inner looks like a profile body, unwrap
@@ -838,7 +957,7 @@ class MqttBridge:
         base_cmd = FIXED_COMMAND_BASE
 
         # Widget types that don't require an entity_id (use specialized entity fields instead)
-        _NO_ENTITY_TYPES = ("label", "clock", "timer", "camera", "webpage", "mealie", "printer")
+        _NO_ENTITY_TYPES = ("label", "clock", "timer", "camera", "webpage", "mealie", "printer", "video")
 
         def _coerce_int(v: Any, default: int) -> int:
             try:
@@ -921,8 +1040,11 @@ class MqttBridge:
                 if sanitized:
                     out["format"] = sanitized
 
-            # Light: brightness attribute topic (skipped when dimmable is explicitly False)
+            # Light: brightness attribute topic (skipped when dimmable is explicitly False).
+            # attr_base lets the device read supported_color_modes and decide
+            # whether drag-to-dim applies (on/off-only lights don't dim).
             if wtype == "light" and dom == "light" and obj:
+                out["attr_base"] = f"{base_stream}/{dom}/{obj}/attributes"
                 _dimmable = wdef.get("dimmable")
                 if _dimmable is False:
                     out["dimmable"] = False
@@ -949,6 +1071,18 @@ class MqttBridge:
                 c = wdef.get("configurable")
                 if isinstance(c, bool):
                     out["configurable"] = c
+                pr = wdef.get("presets")
+                if isinstance(pr, list):
+                    secs = []
+                    for v in pr:
+                        try:
+                            iv = int(v)
+                        except (TypeError, ValueError):
+                            continue
+                        if 0 < iv <= 99 * 3600:
+                            secs.append(iv)
+                    if secs:
+                        out["presets"] = secs[:21]
 
             # Climate: attr_base for temperatures, modes, state_formats
             if wtype == "climate":
@@ -960,6 +1094,9 @@ class MqttBridge:
                 sf = wdef.get("state_formats")
                 if isinstance(sf, dict):
                     out["state_formats"] = sf
+                ts = wdef.get("temp_step")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and 0 < ts <= 10:
+                    out["temp_step"] = float(ts)
 
             # Cover: attr_base exposes current_position / current_tilt_position /
             # supported_features so the client can adapt controls to the device.
@@ -1020,6 +1157,13 @@ class MqttBridge:
                 pu = wdef.get("progress_unit")
                 if isinstance(pu, str):
                     out["progress_unit"] = pu
+                _ent_t("nozzle_target_entity", "nozzle_target_topic")
+                _ent_t("bed_target_entity", "bed_target_topic")
+                _ent_t("layer_entity", "layer_topic")
+                _ent_t("total_layers_entity", "total_layers_topic")
+                pe = wdef.get("preview_entity")
+                if isinstance(pe, str) and pe.startswith("image."):
+                    out["preview_topic"] = art_topic(pe.strip().lower())
                 vr = wdef.get("visible_rows")
                 if isinstance(vr, list):
                     out["visible_rows"] = vr
@@ -1030,10 +1174,15 @@ class MqttBridge:
                 _ent_t("target_entity", "target_topic")
                 _ent_t("time_entity", "time_topic")
 
-            # Appliance: time/program topics
+            # Appliance: time/program/progress/phase topics (progress & phase
+            # are inferred for washdata-style entities when not configured)
             if wtype == "appliance":
+                for k, v in _appliance_siblings(self.hass, wdef).items():
+                    wdef[k] = v
                 _ent_t("time_entity", "time_topic")
                 _ent_t("program_entity", "program_topic")
+                _ent_t("progress_entity", "progress_topic")
+                _ent_t("phase_entity", "phase_topic")
 
             # Media player: inject per-attribute statestream topics
             if wtype == "mediaplayer" and dom and obj:
@@ -1042,6 +1191,11 @@ class MqttBridge:
                 out["artist_topic"]   = f"{attr_base}/media_artist"
                 out["position_topic"] = f"{attr_base}/media_position"
                 out["duration_topic"] = f"{attr_base}/media_duration"
+                out["attr_base"] = attr_base
+                if wdef.get("show_art") is False:
+                    out["show_art"] = False
+                elif dom == "media_player":
+                    out["art_topic"] = art_topic(ent.strip().lower())
 
             # Camera: stream_url, scale_mode, overlay_button with topics
             if wtype == "camera":
@@ -1051,6 +1205,14 @@ class MqttBridge:
                 sm = wdef.get("scale_mode")
                 if isinstance(sm, str):
                     out["scale_mode"] = sm
+                ce = wdef.get("camera_entity")
+                if isinstance(ce, str) and ce.strip().lower().startswith("camera."):
+                    ce = ce.strip().lower()
+                    out["camera_entity"] = ce
+                    out["frame_topic"] = frame_topic(ce)
+                ri = wdef.get("refresh_interval")
+                if isinstance(ri, (int, float)) and not isinstance(ri, bool) and ri > 0:
+                    out["refresh_interval"] = max(0.2, min(float(ri), 60.0))
                 ob = wdef.get("overlay_button")
                 if isinstance(ob, dict):
                     ob_ent = ob.get("entity_id")
@@ -1197,15 +1359,16 @@ class MqttBridge:
 
     # ---------- mirror ----------
     async def _maybe_start_mirror(self, *, publish_snapshot: bool = True) -> None:
-        # Compute effective entity list: auto-derive from profiles, or use manual list
-        if self.cfg.get(CONF_MIRROR_AUTO):
-            profiles = dict(self.cfg.get(CONF_PROFILES, {}) or {})
-            wanted = _extract_entities_from_profiles(profiles)
-            _LOGGER.debug("mirror auto-derived %d entities from profiles", len(wanted))
-        else:
-            wanted = [w.lower() for w in list(self.cfg.get(CONF_MIRROR_ENTITIES, []) or [])
-                      if isinstance(w, str) and "." in w]
+        # The entities the profiles use (a manual list from older versions is ignored)
+        profiles = dict(self.cfg.get(CONF_PROFILES, {}) or {})
+        wanted = _extract_entities_from_profiles(profiles, self.hass)
+        _LOGGER.debug("mirror: %d entities from profiles", len(wanted))
         self._mirror_wanted = wanted
+        try:
+            art, cams = _relay_entities(dict(self.cfg.get(CONF_PROFILES, {}) or {}))
+            await self._relay.async_configure(art, cams)
+        except Exception:
+            _LOGGER.exception("media relay configure failed")
 
         if self._mirror_unsub:
             try: self._mirror_unsub()
@@ -1213,16 +1376,11 @@ class MqttBridge:
             self._mirror_unsub = None
 
         if not wanted:
-            _LOGGER.warning(
-                "ha_mqtt_dash: mirror has no entities to track (auto=%s, manual_count=%d). "
-                "Go to Integration → Configure → 'Mirror entities to MQTT' to configure.",
-                bool(self.cfg.get(CONF_MIRROR_AUTO)),
-                len(self.cfg.get(CONF_MIRROR_ENTITIES, []) or []),
-            )
+            _LOGGER.debug("mirror: no profile uses an entity yet")
             return
 
         self._mirror_unsub = async_track_state_change_event(self.hass, wanted, self._on_state_changed)
-        _LOGGER.debug("mirror started for %d entities (auto=%s)", len(wanted), bool(self.cfg.get(CONF_MIRROR_AUTO)))
+        _LOGGER.debug("mirror started for %d entities", len(wanted))
         if publish_snapshot:
             await self.async_publish_snapshot()
 
@@ -1253,7 +1411,7 @@ class MqttBridge:
         new_attr_map: Dict[str, str] = {}
         prev_attr_map: Dict[str, str] = dict(self._attr_vals_by_entity.get(ent_key, {}))
         for k, v in new_state.attributes.items():
-            sv = str(v)
+            sv = _attr_str(v)
             new_attr_map[k] = sv
             if prev_attr_map.get(k) != sv:
                 await mqtt.async_publish(self.hass, f"{base}/{dom}/{obj}/attributes/{k}", sv, qos=0, retain=True)
@@ -1280,7 +1438,7 @@ class MqttBridge:
             # Attributes: publish all on snapshot; record exact values for future dedupe/purge
             attr_map: Dict[str, str] = {}
             for k, v in st.attributes.items():
-                sv = str(v)
+                sv = _attr_str(v)
                 await mqtt.async_publish(self.hass, f"{base}/{dom}/{obj}/attributes/{k}", sv, qos=0, retain=True)
                 attr_map[k] = sv
             self._attr_vals_by_entity[ent_key] = attr_map
@@ -1292,7 +1450,12 @@ class MqttBridge:
             dom, obj = ent_id.split(".", 1)
             await mqtt.async_publish(self.hass, f"{base}/{dom}/{obj}/state", "", qos=0, retain=True)
             # Purge per-attribute retained values we previously published
-            prev = self._attr_vals_by_entity.pop(ent_id, {})
+            prev = dict(self._attr_vals_by_entity.pop(ent_id, {}))
+            st = self.hass.states.get(ent_id)
+            if st is not None:
+                # After an entry reload the cache is empty; clear what HA has too
+                for k in st.attributes.keys():
+                    prev.setdefault(k, "")
             for k in list(prev.keys()):
                 await mqtt.async_publish(self.hass, f"{base}/{dom}/{obj}/attributes/{k}", "", qos=0, retain=True)
 
@@ -1310,6 +1473,13 @@ class MqttBridge:
             device_id = topic.split("/")[-2]
         except Exception:
             return
+        if not getattr(msg, "retain", False):
+            self.note_contact(device_id, "hello")
+        if not _valid_device_id(device_id):
+            _LOGGER.warning("device_hello: ignoring invalid device id %r", device_id)
+            return
+        if not isinstance(payload, dict):
+            payload = {}
 
         guid = (payload.get("guid") or "").strip()
         prev_id = (payload.get("prev_id") or "").strip()
@@ -1318,14 +1488,23 @@ class MqttBridge:
 
         # Always operate on a fresh snapshot of options to avoid overwriting concurrent edits
         opts = dict(self.entry.options or {})
-        devices: List[Dict[str, Any]] = list(opts.get(CONF_DEVICES, []) or [])
+        # Copy records: mutating the dicts inside entry.options in place makes
+        # async_update_entry see "no change" and silently skip saving.
+        devices: List[Dict[str, Any]] = [dict(d) for d in (opts.get(CONF_DEVICES, []) or []) if isinstance(d, dict)]
 
         # If this device (by guid or incoming device_id) was explicitly purged via HA Delete Device, ignore hello
+        # A device that is currently registered is live, whatever stale purge
+        # markers say: deleting an old device that ran on the same iPad leaves
+        # its hardware GUID on the purged list, which used to drop every hello.
+        registered = any(d.get("device_id") == device_id for d in devices)
         try:
-            await self._storage_helper.async_init()
             if self._storage_helper.is_purged_device(device_id=(device_id or None), guid=(guid or None)):
-                _LOGGER.info("device_hello: ignoring purged device hello (device_id=%s guid=%s)", device_id, guid)
-                return
+                if registered:
+                    _LOGGER.info("device_hello: clearing stale purge marker for registered device %s", device_id)
+                    await self._storage_helper.remove_purged(device_id=(device_id or None), guid=(guid or None))
+                else:
+                    _LOGGER.info("device_hello: ignoring purged device hello (device_id=%s guid=%s)", device_id, guid)
+                    return
         except Exception:
             _LOGGER.debug("device_hello: purged check failed", exc_info=True)
 
@@ -1408,8 +1587,7 @@ class MqttBridge:
         try:
             cur = self._storage_helper.get_device_settings(device_id)
             if cur:
-                payload = json.dumps(cur)
-                await mqtt.async_publish(self.hass, f"{base_dev}/{device_id}/settings", payload, qos=0, retain=True)
+                await self._publish_settings(device_id, cur)
                 async_dispatcher_send(self.hass, SIGNAL_DEVICE_SETTINGS_UPDATED, device_id, dict(cur))
         except Exception:
             _LOGGER.debug("hello settings republish skipped", exc_info=True)
@@ -1424,6 +1602,8 @@ class MqttBridge:
             req = json.loads(raw) if raw else {}
         except Exception:
             req = {}
+        if not isinstance(req, dict):
+            req = {}
         topic = getattr(msg, "topic", "") or ""
         # topic format: mqttdash/dev/<device_id>/request
         device_id = ""
@@ -1436,7 +1616,17 @@ class MqttBridge:
             device_id = ""
 
         action = (req.get("action") or "").lower()
+        if action in ("snapshot", "onboard") and device_id:
+            self.note_contact(device_id, f"request/{action}")
         if action == "snapshot":
+            # Every device asks for a snapshot on (re)connect; retained topics
+            # already carry the state, so don't flood the broker on reconnect storms.
+            import time as _t
+            now = _t.monotonic()
+            if now - self._last_snapshot_mono < 30.0:
+                _LOGGER.debug("device_request: snapshot skipped (rate limited)")
+                return
+            self._last_snapshot_mono = now
             _LOGGER.debug("device_request: snapshot requested")
             await self.async_publish_snapshot()
         elif action == "onboard":
@@ -1449,7 +1639,7 @@ class MqttBridge:
                 _LOGGER.debug("device_request:onboard: failed to clear purged markers for %s / %s", device_id, guid, exc_info=True)
 
             # Ensure device exists in options; if missing, add placeholder record
-            devices: List[Dict[str, Any]] = list(self.cfg.get(CONF_DEVICES, []) or [])
+            devices: List[Dict[str, Any]] = [dict(d) for d in (self.cfg.get(CONF_DEVICES, []) or []) if isinstance(d, dict)]
             by_id = {d.get("device_id"): d for d in devices if isinstance(d, dict)}
             if device_id and device_id not in by_id:
                 rec: Dict[str, Any] = {"device_id": device_id, "profile": ""}
@@ -1470,8 +1660,7 @@ class MqttBridge:
                 try:
                     cur = self._storage_helper.get_device_settings(device_id)
                     if cur:
-                        payload = json.dumps(cur)
-                        await mqtt.async_publish(self.hass, f"{base_dev}/{device_id}/settings", payload, qos=0, retain=True)
+                        await self._publish_settings(device_id, cur)
                         async_dispatcher_send(self.hass, SIGNAL_DEVICE_SETTINGS_UPDATED, device_id, dict(cur))
                 except Exception:
                     _LOGGER.debug("onboard settings republish skipped", exc_info=True)
@@ -1486,15 +1675,22 @@ class MqttBridge:
             return
         parts = topic.split("/")
         key = parts[-1] if parts else ""
+        if not getattr(msg, "retain", False):
+            self.note_contact(device_id, f"telemetry/{key}")
         st = self._telemetry.setdefault(device_id, {})
         # battery (0-100), charging (on/off), orientation (string), keep_awake (on/off)
         if key == "battery":
             try:
                 st["battery"] = int(payload)
+                # Retained values replayed on (re)subscribe are old readings —
+                # only live reports count as fresh for battery care.
+                if not getattr(msg, "retain", False):
+                    self.battery.note_report(device_id)
             except Exception:
                 pass
         elif key == "charging":
             st["charging"] = (payload.strip().lower() in ("on", "true", "1"))
+            self.hass.async_create_task(self.battery.async_evaluate(device_id))
         elif key == "orientation":
             st["orientation"] = payload.strip().lower()
         elif key == "keep_awake":
@@ -1512,7 +1708,6 @@ class MqttBridge:
     async def _on_cmd(self, msg) -> None:
         topic = getattr(msg, "topic", "") or ""
         base_cmd = FIXED_COMMAND_BASE
-        base_dev = FIXED_DEVICE_BASE
 
         raw = _payload_to_str(msg)
         try:
@@ -1529,17 +1724,18 @@ class MqttBridge:
             await self._handle_entity_command(entity_id, cmd)
             return
 
-        # Admin path: <base_dev>/commands (or any other base)
-        action = (cmd.get("action") or "").lower()
+        # Admin path (bare mqttdash/cmd). Device purge is only available from HA
+        # (Delete device); over MQTT any client could otherwise wipe a panel.
+        if not isinstance(cmd, dict):
+            return
+        action = str(cmd.get("action") or "").lower()
         if action == "rename":
-            old_id = (cmd.get("old") or "").strip()
-            new_id = (cmd.get("new") or "").strip()
-            if old_id and new_id and old_id != new_id:
+            old_id = str(cmd.get("old") or "").strip()
+            new_id = str(cmd.get("new") or "").strip()
+            if _valid_device_id(old_id) and _valid_device_id(new_id) and old_id != new_id:
                 await self.async_rename_device(old_id, new_id)
-        elif action == "purge_device":
-            dev = (cmd.get("device_id") or "").strip()
-            if dev:
-                await self.async_purge_device(dev)
+            else:
+                _LOGGER.warning("Ignoring rename with invalid ids %r -> %r", old_id, new_id)
         elif action == "publish_config":
             await self.async_publish_all_configs()
         elif action == "snapshot":
@@ -1550,6 +1746,11 @@ class MqttBridge:
         if not entity_id or "." not in entity_id:
             return
         domain, _obj = entity_id.split(".", 1)
+        if entity_id.lower() not in self._commandable:
+            _LOGGER.warning("Ignoring command for %s: not a controllable widget in any dashboard profile", entity_id)
+            return
+        if not isinstance(cmd, dict):
+            return
         st = self.hass.states.get(entity_id)
         if st is None:
             _LOGGER.warning("Command for unknown entity %s: %s", entity_id, cmd)
@@ -1615,6 +1816,16 @@ class MqttBridge:
                 except Exception:
                     _LOGGER.warning("media_seek failed for %s position=%s", entity_id, position)
             return
+        elif domain == "media_player" and action in _MEDIA_SET_ACTIONS:
+            data = _media_service_data(action, cmd)
+            if data is None:
+                _LOGGER.debug("media %s: bad value in %s", action, cmd)
+                return
+            try:
+                await self.hass.services.async_call("media_player", action, {"entity_id": entity_id, **data}, blocking=False)
+            except Exception:
+                _LOGGER.warning("media %s failed for %s", action, entity_id, exc_info=True)
+            return
         elif domain == "cover" and action in (
             "open_cover", "close_cover", "stop_cover", "toggle",
             "open_cover_tilt", "close_cover_tilt", "stop_cover_tilt",
@@ -1667,7 +1878,7 @@ class MqttBridge:
             await mqtt.async_publish(self.hass, f"{base_dev}/{device_id}/settings", payload, qos=0, retain=True)
         except Exception:
             _LOGGER.debug("purge_device: failed to publish offboard notice for %s", device_id, exc_info=True)
-        devices: List[Dict[str, Any]] = list(self.cfg.get(CONF_DEVICES, []) or [])
+        devices: List[Dict[str, Any]] = [dict(d) for d in (self.cfg.get(CONF_DEVICES, []) or []) if isinstance(d, dict)]
         devices = [d for d in devices if d.get("device_id") != device_id]
         self._save_devices(devices)
         # Remove device and its entities from HA registries
@@ -1699,7 +1910,7 @@ class MqttBridge:
         id so a connected client can self-rename.
         """
         _LOGGER.debug("rename_device: %s -> %s", old_id, new_id)
-        devices: List[Dict[str, Any]] = list(self.cfg.get(CONF_DEVICES, []) or [])
+        devices: List[Dict[str, Any]] = [dict(d) for d in (self.cfg.get(CONF_DEVICES, []) or []) if isinstance(d, dict)]
         # Remove any pre-existing entries with new_id to avoid duplicates
         devices = [d for d in devices if (d.get("device_id") != new_id)]
         found = False
@@ -1775,56 +1986,74 @@ class MqttBridge:
             _LOGGER.debug("purge_device_retained: publish placeholder %s bytes=%d", f"{base_cfg}/{device_id}/config", len(payload))
             await mqtt.async_publish(self.hass, f"{base_cfg}/{device_id}/config", payload, qos=0, retain=True)
 
-    async def async_publish_device_settings(self, device_id: str, *, brightness: Optional[float] = None, keep_awake: Optional[bool] = None, orientation: Optional[str] = None) -> None:
-        """Publish a settings JSON for the device to apply immediately on the client.
-        App consumes keep_awake and brightness.
+    async def async_publish_device_settings(
+        self, device_id: str, *, brightness: Optional[float] = None, keep_awake: Optional[bool] = None,
+        orientation: Optional[str] = None, screensaver_timeout: Optional[int] = None,
+    ) -> None:
+        """Store a settings change and publish the panel's full settings (retained).
+
+        HA entities are the only source of these settings; profiles don't carry them.
         """
-        if not device_id:
+        if not _valid_device_id(device_id):
             return
-        base_dev = FIXED_DEVICE_BASE
         patch: Dict[str, Any] = {}
         if brightness is not None:
-            patch["brightness"] = float(brightness)
+            patch["brightness"] = max(0.05, min(1.0, float(brightness)))
         if keep_awake is not None:
             patch["keep_awake"] = bool(keep_awake)
         if isinstance(orientation, str) and orientation in ("auto", "portrait", "landscape"):
             patch["orientation"] = orientation
+        if screensaver_timeout is not None:
+            patch["screensaver_timeout"] = max(0, int(screensaver_timeout))
         if not patch:
             return
         try:
-            payload = json.dumps(patch, separators=(",", ":"))
-        except Exception:
-            return
-        _LOGGER.debug("publish_device_settings: %s payload=%s", f"{base_dev}/{device_id}/settings", payload)
-        # Retain last settings so late subscribers pick up current brightness/keep_awake/orientation
-        await mqtt.async_publish(self.hass, f"{base_dev}/{device_id}/settings", payload, qos=0, retain=True)
-        # Persist to Store for restart survival
-        try:
             cur = await self._storage_helper.update_device_settings(device_id, patch)
-            # Notify HA entities of device setting change
-            async_dispatcher_send(self.hass, SIGNAL_DEVICE_SETTINGS_UPDATED, device_id, dict(cur))
         except Exception:
             _LOGGER.exception("store save failed (device_settings)")
+            cur = dict(patch)
+        await self._publish_settings(device_id, cur)
+        async_dispatcher_send(self.hass, SIGNAL_DEVICE_SETTINGS_UPDATED, device_id, dict(cur))
 
-    async def async_prune_unassigned(self) -> None:
-        """Remove devices with no profile and no GUID, and purge their retained topics."""
-        devices: List[Dict[str, Any]] = list(self.cfg.get(CONF_DEVICES, []) or [])
-        keep: List[Dict[str, Any]] = []
-        removed: List[str] = []
-        for d in devices:
-            did = (d.get("device_id") or "").strip()
-            prof = (d.get("profile") or "").strip()
-            guid = (d.get("guid") or "").strip()
-            if did and (prof or guid):
-                keep.append(d)
-            elif did:
-                removed.append(did)
-        if removed:
-            _LOGGER.debug("pruning %d unassigned device(s): %s", len(removed), removed)
-            for did in removed:
-                await self._purge_device_retained(did)
-        self._save_devices(keep)
-        await self.async_publish_all_configs()
+    async def _publish_settings(self, device_id: str, settings: Dict[str, Any]) -> None:
+        """Retained, so a reconnecting panel gets all of them, not just the last change."""
+        payload = json.dumps({k: v for k, v in (settings or {}).items() if k in SETTINGS_KEYS}, separators=(",", ":"))
+        if payload == "{}":
+            return
+        await mqtt.async_publish(self.hass, f"{FIXED_DEVICE_BASE}/{device_id}/settings", payload, qos=0, retain=True)
+
+    def note_contact(self, device_id: str, via: str) -> None:
+        """A panel sent something itself (not a retained replay, not our echo)."""
+        if not _valid_device_id(device_id):
+            return
+        self.last_contact[device_id] = {"ts": time.time(), "via": via}
+        async_dispatcher_send(self.hass, SIGNAL_LAST_CONTACT, device_id)
+
+    async def _on_device_status(self, msg) -> None:
+        """online / sleeping / offline (LWT). Feeds battery care's reachability."""
+        topic = getattr(msg, "topic", "") or ""
+        parts = topic.split("/")
+        if len(parts) < 4:
+            return
+        device_id = parts[2]
+        state = _payload_to_str(msg).strip().lower()
+        if state not in ("online", "sleeping", "offline"):
+            return
+        self.battery.note_link(device_id, state)
+        # "sleeping" is only ever published by the app; "online" also by us right
+        # after a hello, which already counted. "offline" comes from the broker.
+        if state == "sleeping" and not getattr(msg, "retain", False):
+            self.note_contact(device_id, "status/sleeping")
+        async_dispatcher_send(self.hass, SIGNAL_LAST_CONTACT, device_id)
+
+    async def async_send_device_request(self, device_id: str, action: str, extra: Optional[Dict[str, Any]] = None) -> None:
+        """Non-retained request to a panel: "wake" (screen on), "report" (battery
+        without waking), "sleep" (lock after a check), "play_video" / "stop_video" / "video_control"."""
+        if not _valid_device_id(device_id) or action not in ("wake", "report", "sleep", "play_video", "stop_video", "video_control"):
+            return
+        payload = {"action": action, **(extra or {})}
+        await mqtt.async_publish(self.hass, f"{FIXED_DEVICE_BASE}/{device_id}/request",
+                                 json.dumps(payload), qos=0, retain=False)
 
     # ---------- device actions ----------
     async def async_publish_device_action(self, device_id: str, *, action: str) -> None:

@@ -13,7 +13,7 @@ class OrientationSelect(SelectEntity):
         self._entry = entry
         self._device_id = device_id
         self._attr_has_entity_name = True
-        self._attr_name = "Orientation"
+        self._attr_translation_key = "orientation"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)}, name=f"{device_id}")
         self._cached: str | None = None
         # Hydrate from Store via bridge if available

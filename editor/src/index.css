@@ -1,0 +1,58 @@
+/* Editor chrome tokens. Defaults are Home Assistant's dark theme; inside HA
+   utils/haTheme.js overrides the base tokens with the active HA theme and the
+   derived ones below follow. The canvas (iPad frame + card previews) has its
+   own fixed colors, like the app. */
+:root {
+  --ed-bg: #111111;
+  --ed-surface: #1c1c1c;
+  --ed-surface-2: #282828;
+  --ed-input-bg: #2a2a2a;
+  --ed-text: #e1e1e1;
+  --ed-text-2: #9b9b9b;
+  --ed-text-3: #6f6f6f;
+  --ed-primary: #03a9f4;
+  --ed-on-primary: #ffffff;
+  --ed-divider: rgba(225, 225, 225, 0.12);
+  --ed-radius: 12px;
+  --ed-font: Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ed-success: #43a047;
+  --ed-error: #db4437;
+  --ed-warning: #ffa600;
+
+  /* derived */
+  --ed-canvas-bg: var(--ed-bg);
+  --ed-ctl-radius: 8px;
+  --ed-btn-radius: 18px;
+  --ed-primary-soft: color-mix(in srgb, var(--ed-primary) 16%, transparent);
+  --ed-warn-bg: color-mix(in srgb, var(--ed-warning) 14%, var(--ed-surface));
+  --ed-overlay: rgba(0, 0, 0, 0.5);
+  --ed-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  --ed-popover-shadow: 0 4px 18px rgba(0, 0, 0, 0.3);
+  --ed-scroll-thumb: color-mix(in srgb, var(--ed-text) 22%, transparent);
+  color-scheme: dark;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--ed-font);
+  font-size: 14px;
+  color: var(--ed-text);
+  background: var(--ed-bg);
+  accent-color: var(--ed-primary);
+}
+
+/* Form controls without explicit inline colors still follow the theme */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+select,
+textarea {
+  font-family: inherit;
+  color: var(--ed-text);
+  background-color: var(--ed-input-bg);
+}

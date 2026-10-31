@@ -8,15 +8,19 @@ The entire integration uses a fixed `mqttdash/*` namespace — no custom bases o
 |-------|-----------|----------|-------------|
 | `mqttdash/config/<device_id>/config` | HA → iPad | Yes | Profile JSON |
 | `mqttdash/dev/<device_id>/hello` | iPad → HA | No | Device hello / identify |
-| `mqttdash/dev/<device_id>/status` | iPad (LWT) | Yes | `online` / `offline` presence |
+| `mqttdash/dev/<device_id>/status` | iPad (LWT) | Yes | `online` (awake) / `sleeping` (screen off, background link) / `offline` |
 | `mqttdash/dev/<device_id>/telemetry` | iPad → HA | No | Battery level and device info |
 | `mqttdash/dev/<device_id>/settings` | HA → iPad | Yes | Device settings (brightness, orientation, keep-awake, screensaver) |
 | `mqttdash/dev/<device_id>/notify` | HA → iPad | No | Push notification payload |
 | `mqttdash/dev/<device_id>/heartbeat` | HA → iPad | Yes | Periodic freshness beat (`{"ts":<unix>,"seq":<n>}`, ~30 s) |
-| `mqttdash/dev/<device_id>/request` | iPad → HA | No | App requests (snapshot, onboard) |
-| `mqttdash/cmd/<entity_id>` | iPad → HA | No | Widget action commands |
+| `mqttdash/dev/<device_id>/request` | both | No | App requests (snapshot, onboard); HA requests (`wake`, `report`) |
+| `mqttdash/dev/<device_id>/camera` | iPad → HA | No | Camera viewer heartbeat `{"entity_id","active","width","interval"}` (~15 s while shown) |
+| `mqttdash/dev/<device_id>/debug` | → iPad | No | Diagnostics (screenshot / tap / page); only honored with "Verbose MQTT log" on |
+| `mqttdash/cmd/<entity_id>` | iPad → HA | No | Widget action commands (only for entities that are controllable widgets in a profile) |
 | `mqttdash/statestream/<domain>/<object>/state` | HA → iPad | Yes | Entity state mirror |
-| `mqttdash/statestream/<domain>/<object>/attributes/<key>` | HA → iPad | Yes | Entity attribute mirror |
+| `mqttdash/statestream/<domain>/<object>/attributes/<key>` | HA → iPad | Yes | Entity attribute mirror (lists/dicts as JSON, datetimes ISO 8601, `None` as empty) |
+| `mqttdash/art/<entity_id>` | HA → iPad | Yes | Album art / print thumbnail JPEG (≤ 320 px); empty = none |
+| `mqttdash/camera/<entity_id>/frame` | HA → iPad | No | Camera frame JPEG, sent only while a device views the camera |
 
 The integration auto-wires widget topics based on entity IDs. Profiles never contain MQTT topic strings.
 
@@ -62,25 +66,23 @@ The integration uses this to update the `sensor.<device_id>_battery` entity.
 
 ### Device settings (HA → iPad)
 
-Published retained to `mqttdash/dev/<device_id>/settings`. All fields are optional — app applies whichever are present:
+Published retained to `mqttdash/dev/<device_id>/settings` whenever one of the panel's setting entities changes, always with all of them (so a reconnecting panel gets the full set). The app applies whichever fields are present:
 
 ```json
 {
   "brightness": 0.8,
   "keep_awake": true,
   "orientation": "landscape",
-  "screensaverTimeout": 120,
-  "screensaverFontSize": 48
+  "screensaver_timeout": 120
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `brightness` | number 0..1 | Screen brightness |
+| `brightness` | number 0.05..1 | Screen brightness (the HA entity shows 5–100 %) |
 | `keep_awake` | boolean | Prevent screen sleep |
 | `orientation` | string | `"auto"` \| `"portrait"` \| `"landscape"` |
-| `screensaverTimeout` | number | Idle seconds before screensaver (0 = disabled) |
-| `screensaverFontSize` | number | Screensaver clock font size in pt (0 = device default) |
+| `screensaver_timeout` | number | Seconds without a touch before the clock screensaver; 0 = off |
 
 ### Notification (HA → iPad)
 
@@ -142,75 +144,42 @@ Published non-retained to `mqttdash/dev/<device_id>/request`:
 
 `snapshot` requests a full state republish. `onboard` re-admits a previously purged device.
 
----
+### Panel requests (HA → iPad)
 
-## HTTP API endpoints
+Same topic, from HA:
 
-Both endpoints require:
-- **Local network only** — RFC-1918 / loopback addresses. Requests from public IPs are rejected with HTTP 403 even with a valid token.
-- **Bearer token** — `Authorization: Bearer <long_lived_token>` (the same auth the HA frontend uses)
-- **API Access enabled** — Integration Options → API Access (time-limited unlock; auto-closes after 10 minutes of inactivity)
-
-### `POST /api/ha_mqtt_dash/apply_profile`
-
-Saves a profile for a device and triggers an immediate MQTT republish.
-
-Request:
 ```json
-{ "device_id": "my_ipad", "profile": { "ui": { ... } } }
+{ "action": "wake" }
+{ "action": "report" }
 ```
 
-Response:
-```json
-{ "status": "ok", "device_id": "my_ipad" }
-```
-
-Rate limited: 20 requests per 60 seconds per IP. Body size limit: 512 KB.
-
-### `GET /api/ha_mqtt_dash/entities`
-
-Returns a sorted list of all entity IDs known to HA. Used by the profile editor for entity autocomplete.
-
-Response:
-```json
-{ "entities": ["binary_sensor.door", "climate.living_room", "light.bedroom"] }
-```
+`wake` turns the screen on (via the kiosk tweak). `report` publishes battery / charging telemetry without waking the screen. Both reach a sleeping panel through its background link.
 
 ---
 
-## Services
+## Editor WebSocket commands
 
-| Service | Description |
-|---------|-------------|
-| `ha_mqtt_dash.push_config` | Republish retained configs for all devices |
-| `ha_mqtt_dash.reload_config` | Transient reload then republish configs |
-| `ha_mqtt_dash.set_device_settings` | Send settings to a device (retained) |
-| `ha_mqtt_dash.publish_snapshot` | Full state snapshot for all mirrored entities |
-| `ha_mqtt_dash.set_device_profile` | Overwrite a device's profile in HA Store and republish |
-| `ha_mqtt_dash.republish_reload_all` | Debounced reload + republish cycle |
-| `ha_mqtt_dash.prune_unassigned` | Remove unassigned devices and purge retained topics |
-| `ha_mqtt_dash.dump_store` | Debug: log HA Store contents |
-| `ha_mqtt_dash.dump_runtime_cfg` | Debug: log merged runtime config |
-| `ha_mqtt_dash.dump_device_config` | Debug: log a single device's resolved config |
+The dashboard editor panel (`/mqttdash-editor`) talks to Home Assistant over its normal WebSocket connection. All commands require an **admin** user:
+
+| Command | Payload | Result |
+|---------|---------|--------|
+| `ha_mqtt_dash/devices` | – | `{"devices": [{"device_id", "has_profile", "battery", "orientation"}]}` |
+| `ha_mqtt_dash/get_profile` | `device_id` | `{"device_id", "profile"}` |
+| `ha_mqtt_dash/apply_profile` | `device_id`, `profile` | saves the profile and republishes it to the panel |
+
+Profiles are limited to 20 pages, 200 widgets per page, 500 widgets in total and 4096 characters per string.
 
 ---
 
-## Notify services
+## Actions
 
-In addition to the integration services, each registered device gets a dynamic HA notify service:
+| Action | Description |
+|--------|-------------|
+| `ha_mqtt_dash.reload` | Publish every panel's config again and make the panels reload it |
+| `ha_mqtt_dash.set_device_profile` | Replace a panel's profile in the HA Store and republish it |
+| `notify.send_message` on `notify.<panel>` | Publish `{"message", "title"?}` to `mqttdash/dev/<device_id>/notify` |
 
-```
-notify.mqttdash_<device_id>
-```
-
-Hyphens in `device_id` become underscores. Fields: `message` (required), `title` (optional).
-
-```yaml
-service: notify.mqttdash_kitchen_ipad
-data:
-  title: "Alert"
-  message: "Oven left on"
-```
+Each panel also has a notify entity (`notify.send_message`), which publishes the same payload.
 
 ---
 
