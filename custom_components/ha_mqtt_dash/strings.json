@@ -131,6 +131,11 @@
       "battery_care": {
         "name": "Battery care"
       }
+    },
+    "media_player": {
+      "video": {
+        "name": "Video"
+      }
     }
   },
   "services": {

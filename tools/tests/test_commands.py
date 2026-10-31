@@ -55,3 +55,14 @@ def test_media_player_controls_are_validated():
         ("media_player", "repeat_set", {"entity_id": mp, "repeat": "one"}),
         ("media_player", "shuffle_set", {"entity_id": mp, "shuffle": True}),
     ]
+
+
+def test_video_requests_reach_the_panel():
+    bridge, hass = _bridge_with_configs()
+    from custom_components.ha_mqtt_dash import mqtt_bridge as mb
+    mb.mqtt.async_publish.reset_mock()
+    for action, extra in (("play_video", {"url": "http://x/master.m3u8"}), ("video_control", {"cmd": "pause"}), ("stop_video", None)):
+        asyncio.run(bridge.async_send_device_request("kitchen", action, extra))
+    sent = [c.args[2] for c in mb.mqtt.async_publish.call_args_list]
+    assert sent == ['{"action": "play_video", "url": "http://x/master.m3u8"}', '{"action": "video_control", "cmd": "pause"}',
+                    '{"action": "stop_video"}']

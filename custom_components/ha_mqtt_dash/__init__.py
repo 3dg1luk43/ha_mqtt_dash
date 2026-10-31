@@ -11,7 +11,7 @@ from homeassistant.helpers.device_registry import async_get as async_get_dev_reg
 from homeassistant.helpers import entity_registry as er  # type: ignore
 from homeassistant.exceptions import ServiceValidationError  # type: ignore
 
-PLATFORMS = ["sensor", "binary_sensor", "switch", "select", "number", "button", "notify"]
+PLATFORMS = ["sensor", "binary_sensor", "switch", "select", "number", "button", "notify", "media_player"]
 from .mqtt_bridge import MqttBridge
 from .editor_panel import async_setup_editor, async_remove_editor_panel, PANEL_URL
 

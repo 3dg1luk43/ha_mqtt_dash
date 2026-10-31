@@ -8,6 +8,7 @@ cannot prove that Home Assistant would accept what we send: config flows,
 entity wiring and real service schemas need a real HA (see CLAUDE.md).
 """
 import importlib.abc
+import importlib.util
 import importlib.machinery
 import pathlib
 import sys
@@ -28,7 +29,9 @@ class _Stub(types.ModuleType):
 
 
 class _StubFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    ROOTS = ("homeassistant", "voluptuous", "aiohttp")
+    # aiohttp is real when installed (tools/requirements-test.txt; the video
+    # relay test serves HTTP), stubbed otherwise
+    ROOTS = ("homeassistant", "voluptuous") + (() if importlib.util.find_spec("aiohttp") else ("aiohttp",))
 
     def find_spec(self, name, path, target=None):
         if name.split(".")[0] in self.ROOTS:

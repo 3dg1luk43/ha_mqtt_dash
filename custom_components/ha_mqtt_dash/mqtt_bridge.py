@@ -29,6 +29,7 @@ from .const import (
 from .storage import StorageHelper
 from .media_relay import MediaRelay, art_topic, frame_topic
 from .battery_care import BatteryCare
+from .video_relay import PanelVideo
 
 # Fixed mqttdash namespace (replaces legacy 'ha/*' topics). User configuration of bases removed.
 _LOGGER = logging.getLogger(__name__)
@@ -332,6 +333,7 @@ class MqttBridge:
         self._commandable: Set[str] = set()
         # Album art / camera frame relay (see media_relay.py)
         self._relay = MediaRelay(hass)
+        self.video = PanelVideo(hass, self)
         self.battery = BatteryCare(hass, self)
         self._last_snapshot_mono = 0.0
         # Last time each panel itself sent anything (for the "Last contact" sensor)
@@ -419,6 +421,7 @@ class MqttBridge:
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/telemetry/#", self._on_device_telemetry))
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/status", self._on_device_status))
         await self._relay.async_setup()
+        await self.video.async_setup()
         await self.battery.async_setup()
         # Periodic freshness heartbeat so clients can detect a stuck backend and
         # auto-reset their connection (every HEARTBEAT_INTERVAL seconds).
@@ -555,6 +558,7 @@ class MqttBridge:
             _LOGGER.debug("battery care unload failed", exc_info=True)
         try:
             await self._relay.async_unload()
+            await self.video.async_unload()
         except Exception:
             _LOGGER.debug("relay unload failed", exc_info=True)
         for u in self._unsubs:
@@ -937,7 +941,7 @@ class MqttBridge:
         base_cmd = FIXED_COMMAND_BASE
 
         # Widget types that don't require an entity_id (use specialized entity fields instead)
-        _NO_ENTITY_TYPES = ("label", "clock", "timer", "camera", "webpage", "mealie", "printer")
+        _NO_ENTITY_TYPES = ("label", "clock", "timer", "camera", "webpage", "mealie", "printer", "video")
 
         def _coerce_int(v: Any, default: int) -> int:
             try:
@@ -2026,14 +2030,14 @@ class MqttBridge:
             self.note_contact(device_id, "status/sleeping")
         async_dispatcher_send(self.hass, SIGNAL_LAST_CONTACT, device_id)
 
-    async def async_send_device_request(self, device_id: str, action: str) -> None:
-        """Non-retained request to a panel ("wake" turns the screen on, "report"
-        asks for battery/charging without waking it). Reaches the panel while
-        its screen is off through the app's background link."""
-        if not _valid_device_id(device_id) or action not in ("wake", "report", "sleep"):
+    async def async_send_device_request(self, device_id: str, action: str, extra: Optional[Dict[str, Any]] = None) -> None:
+        """Non-retained request to a panel: "wake" (screen on), "report" (battery
+        without waking), "sleep" (lock after a check), "play_video" / "stop_video" / "video_control"."""
+        if not _valid_device_id(device_id) or action not in ("wake", "report", "sleep", "play_video", "stop_video", "video_control"):
             return
+        payload = {"action": action, **(extra or {})}
         await mqtt.async_publish(self.hass, f"{FIXED_DEVICE_BASE}/{device_id}/request",
-                                 json.dumps({"action": action}), qos=0, retain=False)
+                                 json.dumps(payload), qos=0, retain=False)
 
     # ---------- device actions ----------
     async def async_publish_device_action(self, device_id: str, *, action: str) -> None:

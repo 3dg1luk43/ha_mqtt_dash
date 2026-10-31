@@ -1,6 +1,9 @@
 {
   "domain": "ha_mqtt_dash",
   "name": "iPad MQTT Dashboard",
+  "after_dependencies": [
+    "media_source"
+  ],
   "codeowners": [
     "@3dg1luk43"
   ],
@@ -9,6 +12,7 @@
     "frontend",
     "http",
     "mqtt",
+    "network",
     "panel_custom",
     "websocket_api"
   ],
@@ -19,7 +23,9 @@
   "loggers": [
     "ha_mqtt_dash"
   ],
-  "requirements": [],
+  "requirements": [
+    "yt-dlp==2026.10.26"
+  ],
   "single_config_entry": true,
   "version": "0.6.0"
 }
