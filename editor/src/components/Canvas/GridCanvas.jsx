@@ -109,6 +109,12 @@ export default function GridCanvas({ containerWidth, containerHeight, dropPrevie
               );
             })()}
 
+            {widgets.length === 0 && !dropPreview && (
+              <div className="ed-empty-hint">
+                <strong>This page is empty.</strong><br />
+                Search for an entity on the left and drag it here, or press Load to start from what the panel shows now.
+              </div>
+            )}
             {widgets.map((w) => (
               <WidgetTile
                 key={w.id}

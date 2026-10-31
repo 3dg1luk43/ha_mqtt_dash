@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { DEVICE_MODELS } from '../data/deviceModels';
+import { DEFAULT_DEVICE } from '../data/deviceModels';
+import { buildProfile } from '../utils/profileExport';
 
-const defaultDevice = DEVICE_MODELS[0];
+const defaultDevice = DEFAULT_DEVICE;
+// What Deploy would send; compared with the last loaded/deployed one for "unsaved changes"
+const profileSig = (s) => JSON.stringify(buildProfile(s));
 
 function autoCell(device, orientation, columns, prevCellH) {
   // MQTTDash lays out in UIKit logical points, not physical pixels.
@@ -32,23 +35,22 @@ export function effectiveGrid(topGrid, page) {
 
 export const useEditorStore = create(
   persist(
-    (set) => ({
+    (set, get) => ({
       device: defaultDevice,
       orientation: 'portrait',
       grid: { ...defaultGrid },
       pages: [newPage('Main')],
       activePageIndex: 0,
       selectedWidgetId: null,
-      banner: '',
       navbar_edge: 'bottom',
       navbar_style: {},
       navbar_show_battery: true,
       navbar_show_keepawake: true,
-      device_settings: { keep_awake: true, screensaver_timeout: 0 },
+      savedSig: null,
       history: [],
       future: [],
 
-      // ── Device / orientation ───────────────────────────────────────────────
+      // ── Device / orientation (both follow the selected panel) ──────────────
       setDevice: (device) => set((s) => {
         const oldH = s.grid.widget_dimensions[1];
         const dims = autoCell(device, s.orientation, s.grid.columns, oldH);
@@ -169,9 +171,9 @@ export const useEditorStore = create(
         future: [],
       })),
 
-      // ── Misc ──────────────────────────────────────────────────────────────
-      setBanner: (banner) => set({ banner }),
+      // ── Nav bar ───────────────────────────────────────────────────────────
       setNavbarEdge: (navbar_edge) => set({ navbar_edge }),
+      setNavbarStyleAll: (navbar_style) => set({ navbar_style: { ...navbar_style } }),
       setNavbarStyle: (patch) => set((s) => {
         const next = { ...s.navbar_style, ...patch };
         // Remove keys explicitly set to undefined/null/empty
@@ -180,7 +182,6 @@ export const useEditorStore = create(
       }),
       setNavbarShowBattery: (v) => set({ navbar_show_battery: v }),
       setNavbarShowKeepAwake: (v) => set({ navbar_show_keepawake: v }),
-      setDeviceSettings: (patch) => set((s) => ({ device_settings: { ...s.device_settings, ...patch } })),
       setWidgets: (widgets) => set((s) => ({  // used by import — replaces active page widgets
         pages: s.pages.map((p, i) => i === s.activePageIndex ? { ...p, widgets } : p),
       })),
@@ -206,18 +207,21 @@ export const useEditorStore = create(
           future: s.future.slice(1),
         };
       }),
-      reset: () => set({
-        device: defaultDevice,
-        orientation: 'portrait',
-        grid: { ...defaultGrid },
+      clearHistory: () => set({ history: [], future: [] }),
+      markSaved: () => set((s) => ({ savedSig: profileSig(s) })),
+      isDirty: () => { const s = get(); return s.savedSig !== profileSig(s); },
+
+      // Clear layout: one empty page; the panel's screen and orientation stay
+      reset: () => set((s) => ({
+        grid: { ...defaultGrid, widget_dimensions: autoCell(s.device, s.orientation, defaultGrid.columns, null) },
         pages: [newPage('Main')],
         activePageIndex: 0,
         selectedWidgetId: null,
-        banner: '',
         navbar_edge: 'bottom',
-        history: [],
+        navbar_style: {},
+        history: [...s.history, { grid: s.grid, pages: s.pages }].slice(-50),
         future: [],
-      }),
+      })),
     }),
     {
       name: 'mqttdash-editor-v4',
@@ -226,14 +230,18 @@ export const useEditorStore = create(
         orientation: s.orientation,
         grid: s.grid,
         pages: s.pages,
-        banner: s.banner,
         navbar_edge: s.navbar_edge,
+        navbar_style: s.navbar_style,
         navbar_show_battery: s.navbar_show_battery,
         navbar_show_keepawake: s.navbar_show_keepawake,
-        device_settings: s.device_settings,
+        savedSig: s.savedSig,
       }),
       merge: (persisted, current) => {
         const merged = { ...current, ...persisted };
+        // Old saves carried a fixed iPad model; the panel's screen is used now
+        if (!merged.device?.points) merged.device = defaultDevice;
+        delete merged.banner;
+        delete merged.device_settings;
         // Guard against missing or malformed pages from old data
         if (!Array.isArray(merged.pages) || merged.pages.length === 0) {
           merged.pages = current.pages;

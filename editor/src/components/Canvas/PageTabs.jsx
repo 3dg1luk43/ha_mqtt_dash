@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { mdiClose, mdiPlus } from '@mdi/js';
 import { useEditorStore } from '../../store/editorStore';
+import { Icon } from '../ui';
 
 export default function PageTabs({ fill = false }) {
   const { pages, activePageIndex, navbar_edge, navbar_style = {}, setActivePage, addPage, removePage, renamePage } = useEditorStore();
@@ -96,6 +98,7 @@ export default function PageTabs({ fill = false }) {
             key={page.id}
             onClick={() => setActivePage(i)}
             onDoubleClick={() => startRename(i, page.name)}
+            title="Double-click to rename"
             style={tabStyle}
           >
             {editingIndex === i ? (
@@ -117,9 +120,10 @@ export default function PageTabs({ fill = false }) {
               <button
                 onClick={(e) => handleRemove(e, i)}
                 title="Delete page"
-                style={{ border: 'none', background: 'none', color: 'rgba(255,255,255,0.45)', cursor: 'pointer', fontSize: 11, padding: '0 1px', lineHeight: 1 }}
+                aria-label={`Delete page ${page.name}`}
+                style={{ border: 'none', background: 'none', color: 'rgba(255,255,255,0.45)', cursor: 'pointer', padding: 0, display: 'flex' }}
               >
-                ×
+                <Icon path={mdiClose} size={12} />
               </button>
             )}
           </div>
@@ -128,7 +132,8 @@ export default function PageTabs({ fill = false }) {
 
       <button
         onClick={() => addPage(`Page ${pages.length + 1}`)}
-        title="Add page"
+        title="Add a page"
+        aria-label="Add a page"
         style={isVertical ? {
           border: `1px dashed ${borderClr}`, borderRadius: 6, background: 'none', color: 'rgba(255,255,255,0.4)',
           cursor: 'pointer', padding: '4px 2px', fontSize: 12, margin: '4px 6px', textAlign: 'center',
@@ -137,14 +142,8 @@ export default function PageTabs({ fill = false }) {
           cursor: 'pointer', padding: '3px 10px', fontSize: 13, marginLeft: 2,
         }}
       >
-        {isVertical ? '+' : '+ page'}
+        <Icon path={mdiPlus} size={14} style={{ margin: '0 auto' }} />
       </button>
-
-      {!isVertical && (
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'rgba(255,255,255,0.3)', flexShrink: 0 }}>
-          Double-click to rename
-        </span>
-      )}
     </div>
   );
 }

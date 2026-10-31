@@ -1,4 +1,4 @@
-// Export/import utilities for MQTTDash profiles (multi-page schema)
+// Profile JSON <-> editor state (multi-page schema; the old flat one still loads)
 
 const WIDGET_EXTRA_KEYS = [
   'unit', 'text', 'time_pattern', 'stream_url', 'scale_mode', 'overlay_button',
@@ -68,22 +68,9 @@ function exportGrid(grid) {
  * Build the new multi-page profile JSON accepted by HA.
  */
 export function buildProfile(state) {
+  // Panel behaviour (keep awake, screensaver, brightness, orientation) lives in
+  // the panel's Home Assistant entities, not in the profile.
   const profile = {};
-  if (state.banner) profile.banner = state.banner;
-
-  // Device-level settings (keep_awake etc.)
-  if (state.device_settings && Object.keys(state.device_settings).length > 0) {
-    const devOut = {};
-    if (typeof state.device_settings.keep_awake === 'boolean') {
-      devOut.keep_awake = state.device_settings.keep_awake;
-    }
-    const sst = state.device_settings.screensaver_timeout;
-    if (typeof sst === 'number' && sst > 0) devOut.screensaver_timeout = sst;
-    const ssf = state.device_settings.screensaver_font_size;
-    if (typeof ssf === 'number' && ssf > 0) devOut.screensaver_font_size = ssf;
-    if (Object.keys(devOut).length > 0) profile.device = devOut;
-  }
-
   profile.ui = {
     navbar_edge: state.navbar_edge ?? 'bottom',
     grid: exportGrid(state.grid),
@@ -143,24 +130,13 @@ export function profileToState(profile) {
       pages = [{ id: `page_${Date.now()}`, name: 'Main', widgets: [] }];
     }
 
-    const deviceSettings = {};
-    if (profile.device && typeof profile.device === 'object') {
-      if (typeof profile.device.keep_awake === 'boolean') deviceSettings.keep_awake = profile.device.keep_awake;
-      if (typeof profile.device.screensaver_timeout === 'number') deviceSettings.screensaver_timeout = profile.device.screensaver_timeout;
-      if (typeof profile.device.screensaver_font_size === 'number') deviceSettings.screensaver_font_size = profile.device.screensaver_font_size;
-    }
-
     return {
-      banner: profile.banner ?? '',
       grid,
       pages,
       navbar_edge: ui.navbar_edge ?? 'bottom',
       navbar_style: (ui.navbar_style && typeof ui.navbar_style === 'object') ? ui.navbar_style : {},
       navbar_show_battery: ui.navbar_show_battery !== false,
       navbar_show_keepawake: ui.navbar_show_keepawake !== false,
-      device_settings: Object.keys(deviceSettings).length > 0
-        ? { screensaver_timeout: 0, ...deviceSettings }
-        : { keep_awake: true, screensaver_timeout: 0 },
     };
   }
 
@@ -168,10 +144,8 @@ export function profileToState(profile) {
   const grid = normaliseGrid(profile.grid ?? {});
   const widgets = (profile.widgets ?? []).map(tagWidget);
   return {
-    banner: profile.banner ?? '',
     grid,
     pages: [{ id: `page_${Date.now()}`, name: 'Main', widgets }],
-    device_settings: { keep_awake: true },
   };
 }
 

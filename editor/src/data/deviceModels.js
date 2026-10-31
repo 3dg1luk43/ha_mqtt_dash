@@ -1,104 +1,20 @@
-// Supported iPad models for MQTT Dash profile editor
-// All use 768x1024 logical points (portrait), 3:4 aspect
+// The canvas is the panel's screen in UIKit points (every supported iPad is
+// 768×1024 pt; Retina only doubles the pixels). Built from the screen info the
+// app sends in its hello, so the frame always matches the selected panel.
 
-export const DEVICE_MODELS = [
-  {
-    key: 'ipad1',
-    name: 'iPad (1st gen)',
-    points: [768, 1024],
-    pixels: [768, 1024],
-    ppi: 132,
-    scale: 1,
-    retina: false,
-    aspect: '3:4',
-    note: 'non-Retina',
-  },
-  {
-    key: 'ipad2',
-    name: 'iPad 2',
-    points: [768, 1024],
-    pixels: [768, 1024],
-    ppi: 132,
-    scale: 1,
-    retina: false,
-    aspect: '3:4',
-    note: 'non-Retina',
-  },
-  {
-    key: 'ipad3',
-    name: 'iPad (3rd gen)',
-    points: [768, 1024],
-    pixels: [1536, 2048],
-    ppi: 264,
-    scale: 2,
-    retina: true,
-    aspect: '3:4',
-    note: 'Retina',
-  },
-  {
-    key: 'ipad4',
-    name: 'iPad (4th gen)',
-    points: [768, 1024],
-    pixels: [1536, 2048],
-    ppi: 264,
-    scale: 2,
-    retina: true,
-    aspect: '3:4',
-    note: 'Retina',
-  },
-  {
-    key: 'min1',
-    name: 'iPad mini (1st gen)',
-    points: [768, 1024],
-    pixels: [768, 1024],
-    ppi: 163,
-    scale: 1,
-    retina: false,
-    aspect: '3:4',
-    note: 'non-Retina',
-  },
-  {
-    key: 'min2',
-    name: 'iPad mini 2',
-    points: [768, 1024],
-    pixels: [1536, 2048],
-    ppi: 326,
-    scale: 2,
-    retina: true,
-    aspect: '3:4',
-    note: 'Retina',
-  },
-  {
-    key: 'min3',
-    name: 'iPad mini 3',
-    points: [768, 1024],
-    pixels: [1536, 2048],
-    ppi: 326,
-    scale: 2,
-    retina: true,
-    aspect: '3:4',
-    note: 'Retina',
-  },
-  {
-    key: 'air1',
-    name: 'iPad Air (1st gen)',
-    points: [768, 1024],
-    pixels: [1536, 2048],
-    ppi: 264,
-    scale: 2,
-    retina: true,
-    aspect: '3:4',
-    note: 'Retina',
-  },
-  {
-    key: 'custom',
-    name: 'Custom',
-    points: [768, 1024],
-    pixels: [1536, 2048],
-    ppi: null,
-    scale: null,
-    retina: null,
-    aspect: '',
-    note: 'User-defined',
-  },
-];
+export const DEFAULT_DEVICE = { key: 'ipad', name: 'iPad', points: [768, 1024], pixels: [768, 1024], scale: 1, retina: false };
+
+export function deviceForScreen(screen) {
+  const w = Number(screen?.width), h = Number(screen?.height);
+  if (!(w > 0 && h > 0)) return DEFAULT_DEVICE;
+  const scale = Number(screen.scale) > 0 ? Number(screen.scale) : 1;
+  const points = [Math.min(w, h), Math.max(w, h)];
+  return {
+    key: `screen-${points[0]}x${points[1]}@${scale}`,
+    name: scale > 1 ? 'iPad (Retina)' : 'iPad',
+    points,
+    pixels: points.map((p) => Math.round(p * scale)),
+    scale,
+    retina: scale > 1,
+  };
+}

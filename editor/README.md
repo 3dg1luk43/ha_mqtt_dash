@@ -11,7 +11,7 @@ WebSocket commands to list panels, load and deploy profiles.
 ```bash
 cd editor
 npm ci
-npm run dev        # local preview (design + JSON export only; no HA connection)
+npm run dev        # local preview with a demo panel and demo entities (no HA connection)
 npm run lint
 ../tools/build_editor.sh   # build for HA and copy into custom_components/ha_mqtt_dash/editor
 ```

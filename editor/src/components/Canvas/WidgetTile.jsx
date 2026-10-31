@@ -1,7 +1,9 @@
 import { useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { tileGeometry } from '../../utils/gridLayout';
+import { mdiClose } from '@mdi/js';
 import WidgetPreview from './WidgetPreview';
+import { Icon } from '../ui';
 
 // iOS app default colors (matched from DashboardViewController.m)
 const CARD_BG = '#1c1f26';
@@ -100,20 +102,19 @@ export default function WidgetTile({ widget, grid, isSelected, hasOverlap, onSel
         </span>
       )}
 
-      {/* Delete button — shown on hover via CSS class */}
+      {/* Remove button, shown on hover */}
       <button
         className="widget-delete-btn"
+        title="Remove card"
+        aria-label="Remove card"
         onClick={(e) => { e.stopPropagation(); onDelete(widget.id); }}
         style={{
-          position: 'absolute', top: 2, right: 2,
-          width: 16, height: 16, borderRadius: '50%',
-          border: 'none', background: '#ef5350', color: '#fff',
-          fontSize: 10, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 0, lineHeight: 1,
+          position: 'absolute', top: 3, right: 3, width: 18, height: 18, borderRadius: '50%',
+          border: 'none', background: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
         }}
       >
-        ×
+        <Icon path={mdiClose} size={12} />
       </button>
 
       {/* Resize handle */}

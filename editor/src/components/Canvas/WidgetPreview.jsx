@@ -1,4 +1,6 @@
-import { WIDGET_TYPES } from '../../data/widgetTypes';
+import { mdiCctv, mdiPrinter3dNozzleOutline, mdiWeb, mdiMusicNote, mdiRefresh, mdiCheck, mdiShuffleVariant, mdiRepeat, mdiVolumeHigh, mdiSpeaker } from '@mdi/js';
+import { typeDef as findType } from '../../data/widgetTypes';
+import { Icon } from '../ui';
 
 // Simulated values for each unit type — makes sensors look realistic in the preview
 const MOCK_VALUES_BY_UNIT = {
@@ -454,7 +456,7 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
           background: 'radial-gradient(ellipse at 30% 25%, #3a4656 0%, #1d232c 55%, #0e1116 100%)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
         }}>
-          <span style={{ fontSize: iconSize, opacity: 0.22 }}>📷</span>
+          <Icon path={mdiCctv} size={iconSize} color="#fff" style={{ opacity: 0.22 }} />
           {src && m >= 90 && (
             <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 9, maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {src}
@@ -470,9 +472,9 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
           </div>
           <div style={{
             position: 'absolute', top: pad, right: pad, width: btn, height: btn, borderRadius: '50%',
-            background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: btn * 0.6, lineHeight: 1,
+            background: 'rgba(0,0,0,0.5)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>↻</div>
+          }}><Icon path={mdiRefresh} size={btn * 0.6} color="#fff" /></div>
           {hasOverlay && (
             <div style={{
               position: 'absolute', bottom: pad, right: pad, maxWidth: '60%',
@@ -516,8 +518,8 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
               <div style={{
                 width: thumb, height: thumb, flexShrink: 0, borderRadius: 8,
                 background: 'linear-gradient(160deg, #3a414d, #23272f)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: thumb * 0.4, opacity: 0.85,
-              }}>📦</div>
+                opacity: 0.85,
+              }}><Icon path={mdiPrinter3dNozzleOutline} size={thumb * 0.45} color="#9aa3b0" /></div>
             )}
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: Math.max(2, gap * 0.6) }}>
               {show('progress') && (
@@ -589,7 +591,7 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
             display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 4,
           }}>
-            <span style={{ fontSize: iconFs, opacity: 0.2 }}>🌐</span>
+            <Icon path={mdiWeb} size={iconFs} color="#fff" style={{ opacity: 0.2 }} />
             <span style={{ color: '#555', fontSize: '9px', textAlign: 'center', padding: '0 4px' }}>{shortUrl}</span>
           </div>
         </div>
@@ -608,7 +610,7 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
       const headerRight = (
         <>
           {!slug && <span style={{ color: TEXT_DIM, fontSize: Math.max(8, hdrFs - 1), whiteSpace: 'nowrap', flexShrink: 0 }}>24 recipes</span>}
-          <span style={{ color: CARD_GRAY, fontSize: hdrFs * 1.25, lineHeight: 1, flexShrink: 0 }}>↻</span>
+          <Icon path={mdiRefresh} size={hdrFs * 1.3} color={CARD_GRAY} />
         </>
       );
 
@@ -636,7 +638,7 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
                         border: `2px solid ${on ? COOK_GREEN : TEXT_DIM}`, background: on ? COOK_GREEN : 'transparent',
                         marginTop: (fs * 1.25 - box) / 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
                         color: '#1a1c20', fontSize: box * 0.6, fontWeight: 800, lineHeight: 1,
-                      }}>{on ? '✓' : null}</span>
+                      }}>{on ? <Icon path={mdiCheck} size={box * 0.75} color="#1a1c20" /> : null}</span>
                       <span style={{ color: on ? TEXT_DIM : textColor, fontSize: fs, lineHeight: 1.25, minWidth: 0 }}>{t}</span>
                     </div>
                   );
@@ -745,57 +747,8 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
     }
 
     // ---- media player ----------------------------------------------------
-    case 'mediaplayer': {
-      const { pad, iw, ih } = cardMetrics(tileW, tileH);
-      const showArt = widget.show_art !== false;
-      const wide = tileW > 1.3 * tileH;
-      const artSide = showArt && wide;
-      const art = artSide ? Math.min(ih, iw * 0.45) : 0;
-      const cw = iw - (artSide ? art + pad : 0);
-      const base = Math.min(cw, ih);
-      const titleFs = clamp(base * 0.13, 10, 18);
-      const artistFs = clamp(titleFs * 0.8, 9, 14);
-      const timeFs = clamp(base * 0.075, 7, 11);
-      const ctrl = clamp(Math.min(ih * 0.26, cw / 4), 18, 44);
-      return (
-        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-          {showArt && !wide && (
-            <>
-              <div style={{ position: 'absolute', inset: 0, background: ART_BG }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,12,16,0.62)' }} />
-            </>
-          )}
-          <div style={{ position: 'relative', height: '100%', display: 'flex', gap: pad, padding: pad, boxSizing: 'border-box' }}>
-            {artSide && (
-              <div style={{
-                width: art, height: art, alignSelf: 'center', flexShrink: 0, borderRadius: 8, background: ART_BG,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.6)', fontSize: art * 0.4,
-              }}>♪</div>
-            )}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ color: '#f2f3f5', fontSize: titleFs, fontWeight: 700, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {widget.label || 'Song Title'}
-              </div>
-              <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: artistFs, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {widget.entity_id ? widget.entity_id.replace('media_player.', '') : 'Artist'}
-              </div>
-              <div style={{ flex: 1, minHeight: 2 }} />
-              <Bar pct={35} color="rgba(255,255,255,0.75)" h={clamp(base * 0.03, 3, 5)} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, color: 'rgba(255,255,255,0.5)', fontSize: timeFs, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                <span>1:12</span><span>3:28</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: ctrl * 0.35, marginTop: 2, flexShrink: 0 }}>
-                <TransportIcon type="prev" size={ctrl * 0.8} />
-                <div style={{ width: ctrl, height: ctrl, borderRadius: '50%', background: 'rgba(255,255,255,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <TransportIcon type="play" size={ctrl * 0.8} color="#1c1f26" />
-                </div>
-                <TransportIcon type="next" size={ctrl * 0.8} />
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
+    case 'mediaplayer':
+      return <MediaPreview widget={widget} W={tileW} H={tileH} />;
 
     // ---- cover (blinds / shades / garage) --------------------------------
     case 'cover': {
@@ -910,13 +863,115 @@ export default function WidgetPreview({ widget, tileW, tileH }) {
 
     // ---- fallback --------------------------------------------------------
     default: {
-      const typeDef = WIDGET_TYPES.find((t) => t.type === type) ?? { icon: '?', label: type };
+      const def = findType(type);
       return (
         <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4px 6px', boxSizing: 'border-box' }}>
-          <span style={{ fontSize: Math.min(18, IH * 0.3) }}>{typeDef.icon}</span>
+          {def && <Icon path={def.icon} size={Math.min(22, IH * 0.3)} color={textColor} />}
           <span style={{ color: textColor, fontSize: '12px', marginTop: 2, textAlign: 'center' }}>{displayLabel}</span>
         </div>
       );
     }
   }
+}
+
+// Media player: same layout rules as the app (DashboardViewController+Media.m),
+// shown with a player that supports everything (output, volume, shuffle, repeat).
+function MediaPreview({ widget, W, H }) {
+  const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const pad = Math.min(W, H) < 125 ? 9 : 11;
+  const showArt = widget.show_art !== false;
+  let info = { x: pad, y: pad, w: W - pad * 2, h: H - pad * 2 };
+  let art = null, backdrop = false;
+  if (showArt) {
+    const sideS = Math.floor(Math.min(H - pad * 2, W * 0.55));
+    const sideInfoW = W - pad * 3 - sideS;
+    const stackH = Math.floor(Math.min(W - pad * 2, H - pad * 3 - Math.max(96, H * 0.44)));
+    if (W >= H * 1.1 && sideS >= 84 && sideInfoW >= 150 && sideS >= (H - pad * 2) * 0.8) {
+      art = { x: pad, y: pad, w: sideS, h: sideS };
+      info = { x: pad * 2 + sideS, y: pad, w: sideInfoW, h: H - pad * 2 };
+    } else if (W >= 120 && stackH >= 72) {
+      art = { x: pad, y: pad, w: W - pad * 2, h: stackH };
+      info = { x: pad, y: pad * 2 + stackH, w: W - pad * 2, h: H - pad * 3 - stackH };
+    } else backdrop = true;
+  }
+  const anchored = backdrop || !showArt;
+  const R = info, iw = R.w, ih = R.h, gap = 6;
+  const b0 = clampN(iw / 5.2, 30, 64), fs0 = clampN(iw / 12.5, 13, 28);
+  let header = false, progress = false, volume = false, lines = 1, k = 1;
+  const total = (kk) => {
+    const fs = Math.max(13, fs0 * kk), b = Math.max(30, b0 * kk);
+    let t = Math.ceil(fs * 1.22) * lines + Math.ceil(fs * 0.74 * 1.3) + b, n = 2;
+    if (header) { t += Math.ceil(clampN(fs * 0.62, 12, 17) * 1.9); n++; }
+    if (progress) { t += 32; n++; }
+    if (volume) { t += Math.max(30, b * 0.6); n++; }
+    return t + gap * (n - 1);
+  };
+  k = 0.8;
+  while (total(k) > ih && k > 0.62) k -= 0.04;
+  if (ih - total(k) >= 34) progress = true;
+  if (ih - total(k) >= 34) volume = true;
+  if (iw >= 200 && ih - total(k) >= 28) header = true;
+  if (ih - total(k) >= fs0 * k * 1.4 && iw >= 180) lines = 2;
+  const bMax = Math.min(76, iw >= 96 ? (iw - 12) / 2.44 : 76);
+  while (k < 1.7 && b0 * (k + 0.04) <= bMax && fs0 * (k + 0.04) <= 34 && total(k + 0.04) <= ih) k += 0.04;
+  const fs = Math.floor(Math.max(13, fs0 * k)), b = Math.floor(Math.max(30, b0 * k)), sb = Math.floor(b * 0.72);
+  const blocks = 2 + header + progress + volume;
+  const spare = Math.max(0, ih - total(k));
+  const between = anchored ? 0 : Math.min(spare / (blocks + 1), 30);
+  let y = R.y + (anchored ? 0 : Math.floor((spare - between * (blocks - 1)) / 2));
+  const els = [];
+  const hf = clampN(fs * 0.62, 12, 17), hh = Math.ceil(hf * 1.9);
+  if (header) {
+    const outW = Math.min(iw * 0.55, 220);
+    els.push(<div key="h" style={{ position: 'absolute', left: R.x, top: y, width: iw - outW - 8, height: hh, lineHeight: `${hh}px`, fontSize: hf, color: '#9aa3af', fontWeight: 500, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{widget.label || 'Media'} · Spotify</div>);
+    els.push(<div key="o" style={{ position: 'absolute', left: R.x + iw - outW, top: y, width: outW, height: hh, borderRadius: hh / 2, background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 8, boxSizing: 'border-box', color: '#f2f4f7', fontSize: hf, fontWeight: 500, overflow: 'hidden', whiteSpace: 'nowrap' }}><Icon path={mdiSpeaker} size={hh * 0.62} color="#f2f4f7" />Kitchen</div>);
+    y += hh + gap + between;
+  } else if (iw >= 120) {
+    els.push(<div key="oi" style={{ position: 'absolute', left: R.x + iw - 28, top: y - 2, width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon path={mdiSpeaker} size={14} color="#f2f4f7" /></div>);
+  }
+  const textW = header || iw < 120 ? iw : iw - 34;
+  const tH = Math.ceil(fs * 1.22) * lines, af = Math.max(12, Math.floor(fs * 0.74));
+  els.push(<div key="t" style={{ position: 'absolute', left: R.x, top: y, width: textW, height: tH, fontSize: fs, lineHeight: `${Math.ceil(fs * 1.22)}px`, color: '#f2f4f7', fontWeight: 500, overflow: 'hidden', ...(lines === 1 ? { whiteSpace: 'nowrap', textOverflow: 'ellipsis' } : {}) }}>Bohemian Rhapsody - Remastered 2011</div>);
+  y += tH;
+  els.push(<div key="a" style={{ position: 'absolute', left: R.x, top: y, width: textW, fontSize: af, color: '#9aa3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Queen</div>);
+  y += Math.ceil(af * 1.3) + gap + between;
+  const rest = (progress ? 32 + gap + between : 0) + b + (volume ? Math.max(30, b * 0.6) + gap + between : 0);
+  if (anchored) y = R.y + ih - rest;
+  if (progress) {
+    els.push(<div key="p" style={{ position: 'absolute', left: R.x, top: y + 7, width: iw, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.16)' }}><div style={{ width: '35%', height: '100%', borderRadius: 2, background: '#f2f4f7' }} /></div>);
+    els.push(<div key="pt" style={{ position: 'absolute', left: R.x, top: y + 19, width: iw, display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#9aa3af', fontVariantNumeric: 'tabular-nums' }}><span>1:12</span><span>5:55</span></div>);
+    y += 32 + gap + between;
+  }
+  const pn = iw >= b + sb * 2 + 12, extra = iw >= b + sb * 4 + 40;
+  const row = [...(extra ? ['shuffle'] : []), ...(pn ? ['prev'] : []), 'play', ...(pn ? ['next'] : []), ...(extra ? ['repeat'] : [])];
+  const used = row.reduce((n, r) => n + (r === 'play' ? b : sb), 0);
+  const sp = row.length > 1 ? Math.min(Math.max(4, (iw - used) / (row.length - 1)), Math.max(14, b * 0.55)) : 0;
+  let x = R.x + Math.floor((iw - used - sp * (row.length - 1)) / 2);
+  for (const r of row) {
+    const sz = r === 'play' ? b : sb;
+    const top = y + Math.floor((b - sz) / 2);
+    const icon = r === 'shuffle' ? <Icon path={mdiShuffleVariant} size={sz * 0.5} color="#f2f4f7" style={{ opacity: 0.45 }} />
+      : r === 'repeat' ? <Icon path={mdiRepeat} size={sz * 0.5} color="#f2f4f7" style={{ opacity: 0.45 }} />
+      : <TransportIcon type={r} size={sz * 0.5} color={r === 'play' ? '#1a1c20' : undefined} />;
+    els.push(<div key={r} style={{ position: 'absolute', left: x, top, width: sz, height: sz, borderRadius: '50%', background: r === 'play' ? '#f2f4f7' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{icon}</div>);
+    x += sz + sp;
+  }
+  y += b + gap + between;
+  if (volume) {
+    const vh = Math.max(30, b * 0.6), vs = Math.min(vh, 34);
+    els.push(<div key="vi" style={{ position: 'absolute', left: R.x - 4, top: y + (vh - vs) / 2, width: vs, height: vs, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon path={mdiVolumeHigh} size={vs * 0.5} color="#f2f4f7" /></div>);
+    els.push(<div key="v" style={{ position: 'absolute', left: R.x + vs + 2, top: y + vh / 2 - 2, width: iw - vs - 2, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.16)' }}><div style={{ width: '60%', height: '100%', borderRadius: 2, background: '#f2f4f7' }} /></div>);
+  }
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', fontFamily: '-apple-system, Helvetica Neue, sans-serif' }}>
+      {backdrop && <><div style={{ position: 'absolute', inset: 0, background: ART_BG }} /><div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.58)' }} /></>}
+      {art && (
+        <div style={{ position: 'absolute', left: art.x, top: art.y, width: art.w, height: art.h, borderRadius: 10, background: ART_BG, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon path={mdiMusicNote} size={Math.min(art.w, art.h) * 0.36} color="rgba(255,255,255,0.6)" />
+        </div>
+      )}
+      {els}
+      {!progress && <div style={{ position: 'absolute', left: 12, right: 12, bottom: 0, height: 3, borderRadius: 1.5, background: 'rgba(255,255,255,0.12)' }}><div style={{ width: '35%', height: '100%', background: '#f2f4f7', borderRadius: 1.5 }} /></div>}
+    </div>
+  );
 }

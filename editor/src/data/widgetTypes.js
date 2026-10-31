@@ -1,192 +1,157 @@
-// Widget type schema definitions for MQTT Dash profile editor
-// Each type: id, label, description, icon, config fields, defaults, etc.
+// Card types the iPad app renders. `group` orders the add panel, `domains`
+// filters the entity picker and maps a dropped HA entity to a card, `size` is
+// the default footprint in cells, `format` lists the format keys the app's
+// card actually reads (see FORMAT_OPTIONS). `hidden` types still load from old
+// profiles but aren't offered for new cards (the app renders them like another type).
+import {
+  mdiLightbulbOutline, mdiToggleSwitchOutline, mdiPalette, mdiGauge, mdiAccountOutline,
+  mdiGestureTapButton, mdiFormatText, mdiClockOutline, mdiWeatherPartlyCloudy, mdiThermostat,
+  mdiCctv, mdiPrinter3dNozzleOutline, mdiTimerOutline, mdiWeb, mdiChefHat, mdiPotSteamOutline,
+  mdiWashingMachine, mdiMusicNote, mdiBlindsHorizontal,
+} from '@mdi/js';
+
+const TOGGLE_FORMAT = ['align', 'vAlign', 'textSize', 'onBgColor', 'onTextColor', 'offBgColor', 'offTextColor'];
+const TEXT_FORMAT = ['align', 'vAlign', 'textSize', 'wrap', 'textColor', 'bgColor'];
+
+export const GROUPS = [
+  { key: 'controls', label: 'Controls' },
+  { key: 'info', label: 'Information' },
+  { key: 'media', label: 'Media' },
+  { key: 'kitchen', label: 'Kitchen & appliances' },
+];
 
 export const WIDGET_TYPES = [
   {
-    type: 'light',
-    label: 'Light',
-    icon: '💡',
-    description: 'On/off toggle; drag on the tile to change brightness (auto-detected)',
-    fields: ['entity_id', 'label', 'protected', 'dimmable', 'format'],
-    format: true,
-    extra: ['dimmable'],
+    type: 'light', label: 'Light', icon: mdiLightbulbOutline, group: 'controls', size: [1, 1],
+    description: 'Tap to switch, drag across the card to dim',
+    domains: ['light'], format: TOGGLE_FORMAT,
   },
   {
-    type: 'switch',
-    label: 'Switch',
-    icon: '🔀',
-    description: 'Full-tile stateful on/off button',
-    fields: ['entity_id', 'label', 'protected', 'format'],
-    format: true,
-    extra: [],
+    type: 'switch', label: 'Switch', icon: mdiToggleSwitchOutline, group: 'controls', size: [1, 1],
+    description: 'On/off for switches, helpers, fans and automations',
+    domains: ['switch', 'input_boolean', 'fan', 'automation', 'siren', 'humidifier'], format: TOGGLE_FORMAT,
   },
   {
-    type: 'scene',
-    label: 'Scene',
-    icon: '🎬',
-    description: 'Stateless trigger; can reflect active state by color',
-    fields: ['entity_id', 'label', 'protected', 'format'],
-    format: true,
-    extra: [],
+    type: 'scene', label: 'Scene or script', icon: mdiPalette, group: 'controls', size: [1, 1],
+    description: 'Runs a scene, script or button entity',
+    domains: ['scene', 'script', 'button', 'input_button'], format: TOGGLE_FORMAT,
   },
   {
-    type: 'sensor',
-    label: 'Sensor',
-    icon: '📟',
-    description: 'Display numeric/text value with optional unit',
-    fields: ['entity_id', 'label', 'unit', 'format'],
-    format: true,
-    extra: ['unit'],
+    type: 'cover', label: 'Cover', icon: mdiBlindsHorizontal, group: 'controls', size: [1, 1],
+    description: 'Blinds, shades and garage doors: open, close, stop, position',
+    domains: ['cover'], format: ['textColor'],
   },
   {
-    type: 'value',
-    label: 'Value',
-    icon: '🔢',
-    description: 'Alias for sensor',
-    fields: ['entity_id', 'label', 'unit', 'format'],
-    format: true,
-    extra: ['unit'],
+    type: 'climate', label: 'Climate', icon: mdiThermostat, group: 'controls', size: [2, 1],
+    description: 'Current and target temperature with mode buttons',
+    domains: ['climate', 'water_heater'], format: [],
   },
   {
-    type: 'person',
-    label: 'Person',
-    icon: '🧑',
-    description: 'Same as sensor (for person entities)',
-    fields: ['entity_id', 'label', 'unit', 'format'],
-    format: true,
-    extra: ['unit'],
+    type: 'sensor', label: 'Sensor', icon: mdiGauge, group: 'info', size: [1, 1],
+    description: 'Shows an entity state with its unit',
+    domains: ['sensor', 'binary_sensor', 'number', 'input_number', 'input_select', 'select', 'input_text', 'counter', 'lock', 'alarm_control_panel', 'vacuum', 'update'],
+    format: [...TEXT_FORMAT, 'maxLines'],
   },
   {
-    type: 'button',
-    label: 'Button',
-    icon: '🔘',
-    description: 'Stateless action button (press only)',
-    fields: ['entity_id', 'label', 'protected', 'format'],
-    format: true,
-    extra: [],
+    type: 'person', label: 'Person', icon: mdiAccountOutline, group: 'info', size: [1, 1],
+    description: 'Where someone is',
+    domains: ['person', 'device_tracker'], format: [...TEXT_FORMAT, 'maxLines'],
   },
   {
-    type: 'label',
-    label: 'Label',
-    icon: '🏷️',
-    description: 'Static text display (no entity required)',
-    fields: ['text', 'label', 'format'],
-    format: true,
-    extra: ['text'],
+    type: 'weather', label: 'Weather', icon: mdiWeatherPartlyCloudy, group: 'info', size: [2, 1],
+    description: 'Selected attributes of a weather entity',
+    domains: ['weather'], format: ['textSize', 'textColor', 'bgColor'],
   },
   {
-    type: 'clock',
-    label: 'Clock',
-    icon: '⏰',
-    description: 'Local device time (no entity required)',
-    fields: ['time_pattern', 'label', 'format'],
-    format: true,
-    extra: ['time_pattern'],
+    type: 'clock', label: 'Clock', icon: mdiClockOutline, group: 'info', size: [2, 1],
+    description: 'The panel\'s local time',
+    domains: [], format: ['align', 'vAlign', 'textSize', 'textColor', 'bgColor'],
   },
   {
-    type: 'weather',
-    label: 'Weather',
-    icon: '🌦️',
-    description: 'Multi-attribute weather display',
-    fields: ['entity_id', 'attrs', 'attr_units', 'label', 'format'],
-    format: true,
-    extra: ['attrs', 'attr_units'],
+    type: 'label', label: 'Text', icon: mdiFormatText, group: 'info', size: [2, 1],
+    description: 'Fixed text',
+    domains: [], format: [...TEXT_FORMAT, 'maxLines'],
   },
   {
-    type: 'climate',
-    label: 'Climate',
-    icon: '🌡️',
-    description: 'HVAC control with temperature display and mode selector',
-    fields: ['entity_id', 'modes', 'state_formats', 'temp_step', 'label', 'format'],
-    format: true,
-    extra: ['modes', 'state_formats', 'temp_step'],
+    type: 'mediaplayer', label: 'Media player', icon: mdiMusicNote, group: 'media', size: [2, 2],
+    description: 'Playback, seek, volume and output; fits any card size',
+    domains: ['media_player'], format: [],
   },
   {
-    type: 'camera',
-    label: 'Camera',
-    icon: '📷',
-    description: 'HA camera entity (relayed by HA) or direct MJPEG/JPEG URL, with optional overlay action button',
-    fields: ['camera_entity', 'stream_url', 'refresh_interval', 'scale_mode', 'overlay_button', 'label', 'format'],
-    format: true,
-    extra: ['camera_entity', 'stream_url', 'refresh_interval', 'scale_mode', 'overlay_button'],
+    type: 'camera', label: 'Camera', icon: mdiCctv, group: 'media', size: [2, 2],
+    description: 'Camera entity relayed by Home Assistant, or a direct MJPEG/JPEG URL',
+    domains: ['camera'], format: ['onBgColor', 'onTextColor', 'offBgColor', 'offTextColor'],
   },
   {
-    type: 'printer',
-    label: '3D Printer',
-    icon: '📦',
-    description: 'Composite 3D printer status',
-    fields: ['nozzle_entity', 'nozzle_target_entity', 'bed_entity', 'bed_target_entity', 'time_entity', 'progress_entity', 'status_entity', 'preview_entity', 'layer_entity', 'total_layers_entity', 'progress_unit', 'visible_rows', 'label', 'format'],
-    format: true,
-    extra: ['nozzle_entity', 'nozzle_target_entity', 'bed_entity', 'bed_target_entity', 'time_entity', 'progress_entity', 'status_entity', 'preview_entity', 'layer_entity', 'total_layers_entity', 'progress_unit', 'visible_rows'],
+    type: 'webpage', label: 'Web page', icon: mdiWeb, group: 'media', size: [2, 2],
+    description: 'Embeds a web page',
+    domains: [], format: [],
   },
   {
-    type: 'timer',
-    label: 'Timer',
-    icon: '⏱️',
-    description: 'Local countdown timer — no entity, no MQTT',
-    fields: ['label', 'default_seconds', 'presets', 'configurable', 'format'],
-    format: true,
-    extra: ['default_seconds', 'presets', 'configurable'],
+    type: 'timer', label: 'Timer', icon: mdiTimerOutline, group: 'kitchen', size: [1, 1],
+    description: 'Countdown on the panel itself, with saved quick picks',
+    domains: [], format: ['textColor'],
   },
   {
-    type: 'webpage',
-    label: 'Webpage',
-    icon: '🌐',
-    description: 'Embeds a web page in the tile',
-    fields: ['label', 'stream_url', 'format'],
-    format: true,
-    extra: ['stream_url'],
+    type: 'mealie', label: 'Mealie recipes', icon: mdiChefHat, group: 'kitchen', size: [3, 4],
+    description: 'Recipes from a self-hosted Mealie, readable next to the timers',
+    domains: [], format: ['textSize'],
   },
   {
-    type: 'mealie',
-    label: 'Mealie',
-    icon: '🍽️',
-    description: 'Recipe browser / viewer from a self-hosted Mealie instance',
-    fields: ['label', 'mealie_url', 'mealie_api_key', 'recipe_slug', 'visible_section', 'format'],
-    format: true,
-    extra: ['mealie_url', 'mealie_api_key', 'recipe_slug', 'visible_section'],
+    type: 'sousvide', label: 'Sous vide', icon: mdiPotSteamOutline, group: 'kitchen', size: [2, 1],
+    description: 'Cooker state, water and target temperature, time left',
+    domains: ['sensor', 'binary_sensor', 'switch', 'climate'], format: ['textSize'],
   },
   {
-    type: 'sousvide',
-    label: 'Sous Vide',
-    icon: '♨️',
-    description: 'Status, current & target temperature, and time remaining from a sous vide cooker',
-    fields: ['entity_id', 'label', 'temp_entity', 'target_entity', 'time_entity', 'unit', 'format'],
-    format: true,
-    extra: ['temp_entity', 'target_entity', 'time_entity', 'unit'],
+    type: 'appliance', label: 'Appliance', icon: mdiWashingMachine, group: 'kitchen', size: [2, 1],
+    description: 'Washer, dryer or dishwasher: program, phase, time left',
+    domains: ['sensor', 'binary_sensor', 'switch', 'select'], format: ['textSize'],
   },
   {
-    type: 'appliance',
-    label: 'Appliance',
-    icon: '🏠',
-    description: 'Running state, program, phase, progress and time remaining',
-    fields: ['entity_id', 'label', 'program_entity', 'time_entity', 'progress_entity', 'phase_entity', 'format'],
-    format: true,
-    extra: ['program_entity', 'time_entity', 'progress_entity', 'phase_entity'],
+    type: 'printer', label: '3D printer', icon: mdiPrinter3dNozzleOutline, group: 'kitchen', size: [2, 2],
+    description: 'Print status, progress, temperatures and preview',
+    domains: ['sensor'], format: ['textSize'],
+  },
+  // Older profiles: rendered by the app exactly like sensor / scene.
+  {
+    type: 'value', label: 'Sensor', icon: mdiGauge, group: 'info', size: [1, 1], hidden: true,
+    description: 'Shows an entity state with its unit', domains: ['sensor'], format: [...TEXT_FORMAT, 'maxLines'],
   },
   {
-    type: 'mediaplayer',
-    label: 'Media Player',
-    icon: '🎵',
-    description: 'Album art, song title, artist, play/pause, next/previous, seekable progress bar',
-    fields: ['entity_id', 'label', 'show_art', 'format'],
-    format: true,
-    extra: ['show_art'],
-  },
-  {
-    type: 'cover',
-    label: 'Cover',
-    icon: '🪟',
-    description: 'Blinds, shades, or garage doors — open/close/stop, position and tilt; controls adapt to the entity',
-    fields: ['entity_id', 'label', 'protected', 'cover_items', 'cover_layout', 'position_presets', 'format'],
-    format: true,
-    extra: ['cover_items', 'cover_layout', 'position_presets'],
+    type: 'button', label: 'Button', icon: mdiGestureTapButton, group: 'controls', size: [1, 1], hidden: true,
+    description: 'Runs a scene, script or button entity', domains: ['scene', 'script', 'button', 'input_button'], format: TOGGLE_FORMAT,
   },
 ];
 
-// Common format fields for all widgets
-export const FORMAT_FIELDS = [
-  'align', 'vAlign', 'textSize', 'textColor', 'bgColor',
-  'onTextColor', 'offTextColor', 'onBgColor', 'offBgColor',
-  'wrap', 'maxLines',
-];
+export const typeDef = (type) => WIDGET_TYPES.find((t) => t.type === type);
+
+// Dropping an HA entity: the first visible card type that lists its domain.
+// Anything else shows its state on a sensor card.
+export function cardTypeForEntity(entityId) {
+  const domain = String(entityId).split('.')[0];
+  const t = WIDGET_TYPES.find((d) => !d.hidden && d.domains[0] === domain)
+    ?? WIDGET_TYPES.find((d) => !d.hidden && d.domains.includes(domain) && !['sousvide', 'appliance', 'printer'].includes(d.type));
+  return t?.type ?? 'sensor';
+}
+
+// Format keys → editor control. Labels follow what the app does with them.
+export const FORMAT_OPTIONS = {
+  align: { kind: 'align', label: 'Horizontal alignment' },
+  vAlign: { kind: 'valign', label: 'Vertical alignment' },
+  textSize: { kind: 'size', label: 'Text size' },
+  wrap: { kind: 'wrap', label: 'Wrap long text' },
+  maxLines: { kind: 'lines', label: 'Max lines' },
+  textColor: { kind: 'color', label: 'Text color' },
+  bgColor: { kind: 'color', label: 'Background' },
+  onBgColor: { kind: 'color', label: 'On: background' },
+  onTextColor: { kind: 'color', label: 'On: text' },
+  offBgColor: { kind: 'color', label: 'Off: background' },
+  offTextColor: { kind: 'color', label: 'Off: text' },
+};
+
+// Card-specific wording for the shared keys
+export const FORMAT_LABELS = {
+  timer: { textColor: 'Accent color' },
+  camera: { onBgColor: 'Overlay button on', onTextColor: 'Overlay text on', offBgColor: 'Overlay button off', offTextColor: 'Overlay text off' },
+  cover: { textColor: 'Status text color' },
+};
