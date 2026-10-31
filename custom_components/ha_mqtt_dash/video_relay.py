@@ -247,6 +247,18 @@ def _ipad_h264(fmt: Dict[str, Any], max_height: int) -> bool:
     return bool(m) and int(m.group(3), 16) <= 31 and (fmt.get("height") or 9999) <= max_height and (fmt.get("fps") or 30) <= 30
 
 
+def _audio_rank(fmt: Dict[str, Any], video_language: Optional[str]) -> tuple:
+    """Original soundtrack first (YouTube adds auto-dubbed tracks in other
+    languages), then any non-dubbed track, the video's own language, and AAC-LC
+    over HE-AAC (YouTube's HLS audio has no acodec: itag 234 is the AAC-LC one)."""
+    note = str(fmt.get("format_note") or "").lower()
+    pref = fmt.get("language_preference")
+    original = "original" in note or (isinstance(pref, (int, float)) and pref >= 10)
+    same_language = bool(video_language) and fmt.get("language") == video_language
+    aac_lc = str(fmt.get("acodec") or "").endswith("40.2") or str(fmt.get("format_id") or "").split("-")[0] == "234"
+    return (original, "dubbed" not in note, same_language, aac_lc)
+
+
 @dataclass
 class HlsSource:
     title: Optional[str]
@@ -274,9 +286,7 @@ def resolve_hls(url: str, max_height: int = 480) -> Optional[HlsSource]:
     if not video:
         return None
     audio = [f for f in hls if f.get("vcodec") in (None, "none") and f.get("acodec") != "none"]
-    # AAC-LC (mp4a.40.2) over HE-AAC; YouTube's HLS audio formats carry no acodec,
-    # the higher itag (234) is the AAC-LC one
-    audio.sort(key=lambda f: (str(f.get("acodec") or "").endswith("40.2"), f.get("format_id") or ""), reverse=True)
+    audio.sort(key=lambda f: _audio_rank(f, info.get("language")), reverse=True)
     return HlsSource(
         title=info.get("title"), video=video, audio=audio[0]["url"] if audio else None,
         headers={k: v for k, v in (hls[0].get("http_headers") or {}).items() if isinstance(v, str)},

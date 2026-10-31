@@ -96,3 +96,16 @@ def test_hls_proxy_rewrites_playlists_and_relays_segments_untouched():
         await runner.cleanup()
 
     asyncio.run(run())
+
+
+def test_original_soundtrack_beats_auto_dubs():
+    tracks = [
+        {"format_id": "234-1", "language": "de-DE", "format_note": "Deutsch - dubbed-auto"},
+        {"format_id": "234-9", "language": "uk", "format_note": "Українська - dubbed-auto"},
+        {"format_id": "233-10", "language": "en-US", "language_preference": 10, "format_note": "American English - original (original)"},
+        {"format_id": "234-10", "language": "en-US", "language_preference": 10, "format_note": "American English - original (original)"},
+    ]
+    best = sorted(tracks, key=lambda f: vr._audio_rank(f, "en-US"), reverse=True)[0]
+    assert best["format_id"] == "234-10"          # original, and the AAC-LC variant of it
+    plain = [{"format_id": "233"}, {"format_id": "234"}]   # single-language video
+    assert sorted(plain, key=lambda f: vr._audio_rank(f, None), reverse=True)[0]["format_id"] == "234"
