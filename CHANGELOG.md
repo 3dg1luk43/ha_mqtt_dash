@@ -23,6 +23,7 @@ Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, a
 - **Reachable while asleep:** with the screen off the app keeps a minimal VoIP-mode MQTT link (request topic only), so HA can wake it or read the battery; status reports `sleeping`. Toggle: Settings → Reachable asleep. HA's `sleep` request locks the screen again after a battery check (not while in use, keep-awake on or a timer runs). Lifecycle trace in `Library/Caches/mqttdash_life.log`.
 - The sleep link is also set up when the app starts behind the lock screen (kiosk auto-launch after a respring or reboot); before, iOS suspended it with no link and Wi-Fi dropped.
 - HA's `screensaver_timeout` setting (settings topic) sets the screensaver; 0 turns it off.
+- Connecting runs in the background: with the HA host down the dashboard no longer freezes for up to 12 s per retry, and locking the panel can't get the app killed. Launch and wake connect once instead of twice.
 
 ### Kiosk tweak 1.2
 - Home button works normally (iOS Settings reachable); returns to the dashboard after 2 min idle on the home screen. Wake still skips the lock screen; banners still suppressed.
