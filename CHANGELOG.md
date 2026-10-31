@@ -60,7 +60,7 @@ Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, a
 ### Experimental: video on panels
 - **Video media player** per panel (`media_player.<panel>_video`): `play_media` with a YouTube link or a video URL. HA resolves it with yt-dlp and relays the H.264 HLS the iPad 1 decodes in hardware (≤ 480p, with audio) from its own HTTP server (port 8765), byte for byte, without transcoding. Pause, play, seek and stop; the panel reports state and position.
 - **Video card** (editor, Media group): plays the panel's video at the card's size and keeps playing on other pages; without one, videos open full screen.
-- **Cast from the YouTube app** with `tools/cast_bridge` (a YouTube TV receiver run on any LAN machine). See [docs/video.md](docs/video.md).
+- **Cast from the YouTube app:** every panel is a cast target in the YouTube app on the LAN, like a smart TV, built into the integration (SSDP + DIAL + YouTube's lounge protocol, ported from yt-cast-receiver; no Node, no add-on). Option **YouTube casting** (on by default). See [docs/video.md](docs/video.md).
 
 ### Styling fixes
 - Timers show their accent color when idle too, as in the editor.

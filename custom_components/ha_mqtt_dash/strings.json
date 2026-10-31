@@ -21,7 +21,8 @@
         "title": "iPad MQTT Dashboard",
         "menu_options": {
           "editor": "Open the dashboard editor",
-          "battery": "Battery care"
+          "battery": "Battery care",
+          "cast": "YouTube casting"
         }
       },
       "editor": {
@@ -29,6 +30,13 @@
         "description": "Design your panels' layouts in the editor, then press **Deploy** to send a profile to a panel.\n\n**[Open the dashboard editor]({url})**\n\nIt runs inside Home Assistant using your login (admin only). It isn't in the sidebar unless you switch that on below; otherwise reach it from here or from a panel's device page (Visit).",
         "data": {
           "editor_sidebar": "Show the editor in the sidebar"
+        }
+      },
+      "cast": {
+        "title": "YouTube casting",
+        "description": "Each panel shows up under **Cast** in the YouTube app on phones on the same network, like a smart TV, and plays what you cast. Discovery uses SSDP (UDP 1900) on Home Assistant's network; the panel's video server (port 8765) answers the phone.",
+        "data": {
+          "yt_cast": "Allow casting from the YouTube app"
         }
       },
       "battery": {

@@ -162,12 +162,16 @@ class VideoStream:
 
 
 class MjpegServer:
-    """Plain-HTTP MJPEG for the panels: GET /video/<token>.mjpeg (and .jpg)."""
+    """Plain-HTTP MJPEG for the panels: GET /video/<token>.mjpeg (and .jpg).
+
+    Other modules serve under /<name>/… by setting ``mounts[name]`` to an
+    aiohttp handler (any time, also after start): cast_receiver's DIAL."""
 
     def __init__(self, host: str = "0.0.0.0", port: int = 8765) -> None:
         self.host, self.port = host, port
         self.streams: Dict[str, VideoStream] = {}
         self.hls = HlsProxy()
+        self.mounts: Dict[str, Any] = {}
         self._runner = None
 
     async def start(self) -> None:
@@ -176,6 +180,7 @@ class MjpegServer:
         app.router.add_get("/video/{token}.mjpeg", self._mjpeg)
         app.router.add_get("/video/{token}.jpg", self._jpeg)
         self.hls.routes(app)
+        app.router.add_route("*", "/{mount}/{path:.*}", self._mounted)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         await web.TCPSite(self._runner, self.host, self.port).start()
@@ -198,6 +203,13 @@ class MjpegServer:
         s = self.streams.pop(token, None)
         if s:
             await s.stop()
+
+    async def _mounted(self, request):
+        from aiohttp import web
+        handler = self.mounts.get(request.match_info["mount"])
+        if not handler:
+            raise web.HTTPNotFound()
+        return await handler(request)
 
     async def _jpeg(self, request):
         from aiohttp import web
@@ -442,6 +454,7 @@ class PanelVideo:
         self.hass, self.bridge, self.port, self.transcode = hass, bridge, port, transcode
         self.server: Optional[MjpegServer] = None
         self.active: Dict[str, Dict[str, Any]] = {}   # device_id -> {kind, token, title, url, state, position, …}
+        self.last_end: Dict[str, str] = {}   # device_id -> how the panel's last video ended: ended / closed / error
         self._unsub = None
 
     async def async_setup(self) -> None:
@@ -491,6 +504,7 @@ class PanelVideo:
     async def async_play(self, device_id: str, url: str, *, title: Optional[str] = None, start: float = 0.0) -> None:
         import time as _t
         await self.async_stop(device_id, tell_panel=False)
+        self.last_end.pop(device_id, None)
         self.active[device_id] = {"url": url, "title": title or "Loading…", "state": "loading"}
         self._changed(device_id)
         try:
@@ -567,6 +581,7 @@ class PanelVideo:
         if state in ("ended", "closed", "error"):
             if state == "error":
                 _LOGGER.warning("video on %s: the panel could not play the stream", device_id)
+            self.last_end[device_id] = state
             await self.async_stop(device_id, tell_panel=False)
             return
         a = self.active[device_id]

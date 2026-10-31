@@ -39,17 +39,15 @@ Add a **Video** card in the dashboard editor (Media group), for example on a pag
 
 ## Casting from the YouTube app
 
-`tools/cast_bridge` is a YouTube "TV" receiver ([yt-cast-receiver](https://github.com/patrickkfkan/yt-cast-receiver)): the panel shows up under **Cast** in the YouTube app on the same network, like a smart TV, and the bridge forwards play / pause / seek / stop to the panel's Video player in HA.
+Every panel shows up under **Cast** in the YouTube app on phones on the same network, like a smart TV ("Kitchen iPad" for the panel `kitchen`). Casting plays the video on the panel through its Video player; play, pause, seek, stop, next / previous in the phone's queue work, and pausing, closing or finishing the video on the panel shows on the phone. At the end of a video the next one in the queue plays.
 
-```bash
-cd tools/cast_bridge && npm ci
-HA_URL=https://homeassistant.example.lan HA_TOKEN_FILE=~/.ha_token \
-PANEL_ENTITY=media_player.kitchen_video SCREEN_NAME="Kitchen iPad" DIAL_INTERFACES=eth0 \
-node cast_bridge.mjs
-```
+Home Assistant does this itself (a port of the receiver side of [yt-cast-receiver](https://github.com/patrickkfkan/yt-cast-receiver)): it answers the phones' SSDP searches on UDP 1900 (alongside HA's own SSDP discovery), serves the DIAL description on the video server's port 8765, and keeps each panel linked to YouTube's "lounge" service, which relays the phone's commands. Turn it off in the integration options (**YouTube casting**).
 
-Run it on any always-on machine on the LAN (Node 20+); `ha-mqtt-dash-cast.service.example` is a systemd unit for it. Discovery uses SSDP multicast, so the machine must be on the same network segment as the phones. Notes:
-
-- The receiver re-implements YouTube's TV protocol; a change on YouTube's side can break it until the library is updated.
-- `npm audit` reports moderate issues in the DIAL library's template dependencies (ejs / jake / minimatch); the high ones are overridden in `package.json`. Keep it on the LAN.
+- Phones and the HA host must be on the same network segment (multicast), and HA must run with host networking.
+- Pairing survives restarts: the panel stays in the app's list of linked TVs.
+- A phone that just drops (app closed, Wi-Fi lost) leaves the video playing; **Disconnect** in the app stops it.
+- YouTube Music casting and "up next" autoplay aren't offered.
+- It re-implements YouTube's TV protocol; a change on YouTube's side can break it.
 - The panel's volume is the iPad's own; the sender's volume slider has no effect.
+
+`tools/cast_bridge` is the earlier standalone version (Node, run on another LAN machine against HA's API). Don't run it for a panel that HA already offers, or the panel is listed twice.

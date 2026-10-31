@@ -30,6 +30,7 @@ from .storage import StorageHelper
 from .media_relay import MediaRelay, art_topic, frame_topic
 from .battery_care import BatteryCare
 from .video_relay import PanelVideo
+from .cast_receiver import PanelCast
 
 # Fixed mqttdash namespace (replaces legacy 'ha/*' topics). User configuration of bases removed.
 _LOGGER = logging.getLogger(__name__)
@@ -334,6 +335,7 @@ class MqttBridge:
         # Album art / camera frame relay (see media_relay.py)
         self._relay = MediaRelay(hass)
         self.video = PanelVideo(hass, self)
+        self.cast = PanelCast(hass, self)
         self.battery = BatteryCare(hass, self)
         self._last_snapshot_mono = 0.0
         # Last time each panel itself sent anything (for the "Last contact" sensor)
@@ -472,6 +474,11 @@ class MqttBridge:
         await self.async_publish_all_configs()
         # Subscribe to mirror without snapshot yet; we'll publish a single snapshot on HA started
         await self._maybe_start_mirror(publish_snapshot=False)
+        # YouTube cast receivers (needs the Store loaded for their pairing ids)
+        try:
+            await self.cast.async_setup()
+        except Exception:
+            _LOGGER.exception("youtube cast setup failed")
         # Re-enable options update handling after initial publish
         self._in_options_migration = False
         self._setup_complete = True
@@ -556,6 +563,10 @@ class MqttBridge:
             await self.battery.async_unload()
         except Exception:
             _LOGGER.debug("battery care unload failed", exc_info=True)
+        try:
+            await self.cast.async_unload()
+        except Exception:
+            _LOGGER.debug("youtube cast unload failed", exc_info=True)
         try:
             await self._relay.async_unload()
             await self.video.async_unload()
@@ -659,6 +670,11 @@ class MqttBridge:
         # Trigger immediate republish using the refreshed cfg
         self._republish_reload_pending = True
         await self._do_republish_reload("options_updated")
+        # Casting option or panel list may have changed
+        try:
+            await self.cast.async_sync()
+        except Exception:
+            _LOGGER.exception("youtube cast update failed")
 
     # ---------- retained config ----------
     async def _publish_heartbeats(self, now=None) -> None:

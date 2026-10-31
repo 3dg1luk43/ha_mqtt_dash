@@ -2,7 +2,8 @@
 
 Setup takes no input: panels register themselves when the app first connects
 (its hello), and their layouts are designed in the dashboard editor. The
-options hold the editor link (+ optional sidebar entry) and battery care.
+options hold the editor link (+ optional sidebar entry), battery care and
+YouTube casting.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from homeassistant import config_entries  # type: ignore
 from homeassistant.core import callback  # type: ignore
 from homeassistant.helpers import selector  # type: ignore
 
-from .const import DOMAIN, CONF_DEVICES, CONF_PROFILES, CONF_EDITOR_SIDEBAR
+from .const import DOMAIN, CONF_DEVICES, CONF_PROFILES, CONF_EDITOR_SIDEBAR, CONF_YT_CAST
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[misc]
@@ -31,13 +32,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[misc
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
-    """Dashboard editor link and battery care."""
+    """Dashboard editor link, battery care and YouTube casting."""
 
     def __init__(self, entry: config_entries.ConfigEntry):
         self._entry = entry
 
     async def async_step_init(self, user_input=None):
-        return self.async_show_menu(step_id="init", menu_options=["editor", "battery"])
+        return self.async_show_menu(step_id="init", menu_options=["editor", "battery", "cast"])
 
     # Link to the dashboard-editor panel; its sidebar entry is optional (off by
     # default: the editor is used rarely).
@@ -56,6 +57,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         })
         return self.async_show_form(step_id="editor", data_schema=schema,
                                     description_placeholders={"url": "/mqttdash-editor"})
+
+    # YouTube casting: every panel is a cast target in the YouTube app (on by default)
+    async def async_step_cast(self, user_input=None):
+        current = bool(self._entry.options.get(CONF_YT_CAST, True))
+        if user_input is not None:
+            wanted = bool(user_input.get(CONF_YT_CAST, current))
+            if wanted == current:
+                return await self.async_step_init()
+            opts = {k: v for k, v in (self._entry.options or {}).items() if k != CONF_PROFILES}
+            return self.async_create_entry(title="", data={**opts, CONF_YT_CAST: wanted})
+        schema = vol.Schema({
+            vol.Optional(CONF_YT_CAST, default=current): selector.BooleanSelector(),
+        })
+        return self.async_show_form(step_id="cast", data_schema=schema)
 
     # Battery care: pick the charger plug + charge window per device. Saved to
     # the Store (not options) and ends with an abort-style confirmation so it
