@@ -15,7 +15,7 @@ Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, a
 - **Climate:** instant −/+ (debounced, clamped to min/max), `hvac_action` chip, mode pills, optional `temp_step`.
 - **Timers:** long-press picker with presets, recents, fine adjust and **Save as default**; accurate end-time countdown that survives reloads/restarts; alarm brings its page forward. Running timers keep the screen awake.
 - **Camera:** native MJPEG/snapshot client (no UIWebView) plus `camera_entity` frames relayed by HA; streams only while visible; tap for full screen.
-- **Mealie:** new recipe grid (tag chips, pull or ↻ to refresh) and a full-screen recipe sheet: two columns, large type, tap ingredients to check off and steps to mark done (kept per recipe).
+- **Mealie:** new recipe grid (tag chips, pull or ↻ to refresh) and recipes that open inside the card (back arrow to the list), so timers and the rest of the dashboard stay usable while cooking: two columns on wide cards, tap ingredients to check off and steps to mark done (kept per recipe).
 - **Printer / appliance / sous vide / media player** redesigned; unit-aware durations with ETA; print thumbnail; album art.
 - Identical configs are no longer re-rendered on reconnect; batched, de-duplicated subscriptions; Settings no longer pops up on network blips (auth failures only); "Exit to Home Screen" in the long-press menu.
 
