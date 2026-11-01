@@ -31,6 +31,8 @@ from .media_relay import MediaRelay, art_topic, frame_topic
 from .battery_care import BatteryCare
 from .video_relay import PanelVideo
 from .cast_receiver import PanelCast
+from .delivery import PanelOutbox
+from collections import OrderedDict
 
 # Fixed mqttdash namespace (replaces legacy 'ha/*' topics). User configuration of bases removed.
 _LOGGER = logging.getLogger(__name__)
@@ -337,6 +339,9 @@ class MqttBridge:
         self.video = PanelVideo(hass, self)
         self.cast = PanelCast(hass, self)
         self.battery = BatteryCare(hass, self)
+        # Requests that must reach the panel (video, notifications): kept until acknowledged
+        self.outbox = PanelOutbox(self._outbox_publish, self._outbox_wake, self._outbox_expired)
+        self._seen_cids: "OrderedDict[str, float]" = OrderedDict()   # command ids already executed
         self._last_snapshot_mono = 0.0
         # Last time each panel itself sent anything (for the "Last contact" sensor)
         self.last_contact: Dict[str, Dict[str, Any]] = {}
@@ -422,6 +427,8 @@ class MqttBridge:
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/hello", self._on_device_hello))
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/telemetry/#", self._on_device_telemetry))
         self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/status", self._on_device_status))
+        self._unsubs.append(await mqtt.async_subscribe(self.hass, f"{FIXED_DEVICE_BASE}/+/ack", self._on_device_ack))
+        self._unsubs.append(async_track_time_interval(self.hass, self._outbox_tick, timedelta(seconds=2)))
         await self._relay.async_setup()
         await self.video.async_setup()
         await self.battery.async_setup()
@@ -535,8 +542,8 @@ class MqttBridge:
             if isinstance(title, str) and title.strip():
                 payload["title"] = title.strip()
             topic = f"{FIXED_DEVICE_BASE}/{device_id}/notify"
-            await mqtt.async_publish(self.hass, topic, json.dumps(payload), qos=0, retain=False)
-            _LOGGER.debug("notify: published to %s", topic)
+            await self.outbox.send(device_id.strip(), topic, payload, "notify")
+            _LOGGER.debug("notify: queued for %s", topic)
         except Exception:
             _LOGGER.exception("notify: failed for %s", device_id)
 
@@ -551,6 +558,7 @@ class MqttBridge:
         return
 
     async def async_unload(self) -> None:
+        self.outbox.clear()
         for attr in ("_republish_reload_handle", "_entry_reload_handle", "_started_unsub"):
             h = getattr(self, attr, None)
             if h:
@@ -1718,6 +1726,16 @@ class MqttBridge:
 
         _LOGGER.debug("MQTT command on %s: %s", topic, cmd)
 
+        # The panel re-sends a command it got no broker ack for: run each one once
+        cid = cmd.get("cid") if isinstance(cmd, dict) else None
+        if isinstance(cid, str) and cid:
+            if cid in self._seen_cids:
+                _LOGGER.debug("MQTT command %s already handled", cid)
+                return
+            self._seen_cids[cid] = time.monotonic()
+            while len(self._seen_cids) > 500:
+                self._seen_cids.popitem(last=False)
+
         # Entity command path: <base_cmd>/<entity_id>
         if topic.startswith(f"{base_cmd}/") and len(topic) > len(base_cmd) + 1:
             entity_id = topic[len(base_cmd) + 1:]
@@ -2028,6 +2046,37 @@ class MqttBridge:
             return
         self.last_contact[device_id] = {"ts": time.time(), "via": via}
         async_dispatcher_send(self.hass, SIGNAL_LAST_CONTACT, device_id)
+        if self.outbox.pending(device_id):   # it's back: what's waiting goes out now
+            self.hass.async_create_task(self.outbox.flush(device_id))
+
+    # ---------- requests that must arrive (see delivery.py) ----------
+    async def _outbox_publish(self, topic: str, payload: str) -> None:
+        await mqtt.async_publish(self.hass, topic, payload, qos=1, retain=False)
+
+    async def _outbox_wake(self, device_id: str, power: bool) -> bool:
+        if not power:
+            await self.async_send_device_request(device_id, "wake")
+            return True
+        return self.battery.start_request_wake(device_id)
+
+    def _outbox_expired(self, device_id: str, payload: Dict[str, Any]) -> None:
+        if payload.get("action") == "play_video":
+            self.video.note_undelivered(device_id)
+
+    async def _outbox_tick(self, _now=None) -> None:
+        await self.outbox.tick()
+
+    async def _on_device_ack(self, msg) -> None:
+        parts = (getattr(msg, "topic", "") or "").split("/")
+        if len(parts) < 4 or not _valid_device_id(parts[2]):
+            return
+        try:
+            data = json.loads(_payload_to_str(msg) or "{}")
+        except Exception:
+            return
+        if isinstance(data, dict) and data.get("rid"):
+            self.outbox.ack(parts[2], data["rid"])
+            self.note_contact(parts[2], "ack")
 
     async def _on_device_status(self, msg) -> None:
         """online / sleeping / offline (LWT). Feeds battery care's reachability."""
@@ -2052,8 +2101,13 @@ class MqttBridge:
         if not _valid_device_id(device_id) or action not in ("wake", "report", "sleep", "play_video", "stop_video", "video_control"):
             return
         payload = {"action": action, **(extra or {})}
-        await mqtt.async_publish(self.hass, f"{FIXED_DEVICE_BASE}/{device_id}/request",
-                                 json.dumps(payload), qos=0, retain=False)
+        topic = f"{FIXED_DEVICE_BASE}/{device_id}/request"
+        if action in ("play_video", "stop_video", "video_control"):
+            # Must arrive: re-sent and the panel woken until it acknowledges
+            await self.outbox.send(device_id, topic, payload, action)
+            return
+        # wake / report / sleep: battery care has its own timeouts and fallbacks
+        await mqtt.async_publish(self.hass, topic, json.dumps(payload), qos=0, retain=False)
 
     # ---------- device actions ----------
     async def async_publish_device_action(self, device_id: str, *, action: str) -> None:

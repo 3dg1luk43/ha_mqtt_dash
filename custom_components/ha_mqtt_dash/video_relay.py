@@ -685,13 +685,21 @@ class PanelVideo:
         elif entry["kind"] == "mjpeg":
             server.add(stream)
             await stream.start()
-        entry.update({"url": url, "state": "playing", "position": start, "position_at": _t.time(), "gen": gen})
+        # "loading" (buffering) until the panel reports it plays: it may have to be woken first
+        entry.update({"url": url, "state": "loading", "position": start, "position_at": _t.time(), "gen": gen})
         self.active[device_id] = entry
         self._changed(device_id)
         payload = {"url": panel_url, "title": entry["title"]}
         if start > 0:
             payload["start"] = start
         await self.bridge.async_send_device_request(device_id, "play_video", payload)
+
+    def note_undelivered(self, device_id: str) -> None:
+        """The panel never acknowledged the play request (asleep, off, out of reach)."""
+        a = self.active.get(device_id)
+        if a and a.get("state") == "loading":
+            a.update({"state": "error", "error": "The panel didn't respond"})
+            self._changed(device_id)
 
     async def async_control(self, device_id: str, cmd: str, position: Optional[float] = None) -> None:
         extra: Dict[str, Any] = {"cmd": cmd}

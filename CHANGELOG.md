@@ -4,6 +4,19 @@ All notable changes to iPad MQTT Dashboard (integration, editor and the iPad app
 
 ---
 
+## 0.6.1 - 2026-11-01
+
+Actions reach their target: taps wait for the connection, and video, casting and notifications wait for the panel.
+
+### iOS App
+- **Taps always arrive:** a tap while the connection is down reconnects at once and is sent as soon as the link is back (up to 2 min later). Commands are confirmed by the broker; an unconfirmed one means the link is dead, so the app reconnects and sends it again (HA runs it once). Any touch while offline reconnects right away. Banner: "Reconnecting… 1 action waiting", a short "Connected" when it's back, a notice if an action expired. A Mealie card that failed to load retries once reconnected.
+- **Notifications reach a sleeping panel:** it turns its screen on and shows them.
+
+### Home Assistant Integration
+- **Video and notifications reach the panel:** HA keeps them until the panel acknowledges them, re-sends, wakes the panel (over MQTT, then with its charger plug) and delivers them the moment it's back; the Video player shows buffering until the panel plays. A cast to a sleeping panel starts once it has woken up. See [Delivery](docs/mqtt_topics.md#delivery).
+- **Battery care:** a panel that refuses the charger (plug on, iPad not charging, e.g. "Charging is not supported with this accessory") gets it re-plugged after a minute off, at most hourly; wakes that power-cycle a plug that is already on keep it off for a minute too. Optional presence: works only while someone is home. Configure in options → Battery care; switch, level numbers and a status sensor per panel.
+- See [Delivery](docs/mqtt_topics.md#delivery) for the protocol (`cid` on commands, `rid` + `mqttdash/dev/<id>/ack` on requests); panels and integrations of 0.6.0 keep working with each other.
+
 ## 0.6.0 - 2026-10-31
 
 Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, and a kiosk you can leave.

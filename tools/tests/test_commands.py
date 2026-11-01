@@ -1,3 +1,4 @@
+import json
 import asyncio
 from unittest.mock import AsyncMock
 
@@ -63,6 +64,24 @@ def test_video_requests_reach_the_panel():
     mb.mqtt.async_publish.reset_mock()
     for action, extra in (("play_video", {"url": "http://x/master.m3u8"}), ("video_control", {"cmd": "pause"}), ("stop_video", None)):
         asyncio.run(bridge.async_send_device_request("kitchen", action, extra))
-    sent = [c.args[2] for c in mb.mqtt.async_publish.call_args_list]
-    assert sent == ['{"action": "play_video", "url": "http://x/master.m3u8"}', '{"action": "video_control", "cmd": "pause"}',
-                    '{"action": "stop_video"}']
+    sent = [json.loads(c.args[2]) for c in mb.mqtt.async_publish.call_args_list]
+    assert [{k: v for k, v in p.items() if k != "rid"} for p in sent] == [
+        {"action": "play_video", "url": "http://x/master.m3u8"}, {"action": "video_control", "cmd": "pause"}, {"action": "stop_video"}]
+    assert all(p["rid"] for p in sent)                      # kept until the panel acknowledges each
+    assert all(c.kwargs.get("qos") == 1 for c in mb.mqtt.async_publish.call_args_list)
+    assert bridge.outbox.pending("kitchen") == 1            # the stop replaced the waiting play / pause
+    asyncio.run(bridge._on_device_ack(type("M", (), {"topic": "mqttdash/dev/kitchen/ack", "payload": json.dumps({"rid": sent[2]["rid"]})})()))
+    assert bridge.outbox.pending("kitchen") == 0
+
+
+def test_a_command_resent_by_the_panel_runs_once():
+    bridge, hass = _bridge_with_configs()
+    calls = []
+
+    async def handle(entity_id, cmd):
+        calls.append(entity_id)
+    bridge._handle_entity_command = handle
+    msg = type("M", (), {"topic": "mqttdash/cmd/light.kitchen", "payload": '{"action": "turn_on", "cid": "kitchen-1"}'})()
+    asyncio.run(bridge._on_cmd(msg))
+    asyncio.run(bridge._on_cmd(msg))
+    assert calls == ["light.kitchen"]

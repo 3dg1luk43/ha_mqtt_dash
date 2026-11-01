@@ -581,6 +581,8 @@ class YouTubeReceiver:
             new = PLAYING if state == "playing" else PAUSED
             if new != self.status:
                 await self._set_status(new)
+        elif state == "error" and prev != "error":
+            await self._set_status(STOPPED)   # e.g. the panel never answered
         elif state is None and prev is not None:
             if snap.get("end") == "ended" and self._has_prev_next()[1]:
                 await self._step(+1)   # next in the sender's queue

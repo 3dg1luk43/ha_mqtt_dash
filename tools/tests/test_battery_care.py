@@ -182,3 +182,39 @@ def test_levels_are_clamped():
     assert bc.clamp_levels(75, 70) == (60, 70)
     assert bc.clamp_levels(5, 200) == (10, 100)
     assert bc.clamp_levels("x", None) == (35, 80)
+
+
+def _not_charging(bc, care, bridge, battery=50):
+    bc.POWER_GAP = 0
+    care._started -= bc.STARTUP_GRACE
+    bridge._telemetry["kitchen"]["charging"] = False
+    return _report(care, bridge, battery)
+
+
+def test_a_charger_the_panel_refuses_is_replugged_at_most_hourly():
+    bc, care, bridge, charger = _care()
+    st = _not_charging(bc, care, bridge)
+    assert "not charging" in st["warning"]
+    _run_tasks(care)
+    assert charger["calls"][-2:] == ["turn_off", "turn_on"] and charger["state"] == "on"
+    calls = len(charger["calls"])
+    _report(care, bridge, 50)                  # still not charging, but re-plugged a moment ago
+    _run_tasks(care)
+    assert len(charger["calls"]) == calls
+
+
+def test_replugging_gives_up_and_a_charging_panel_resets_it():
+    bc, care, bridge, charger = _care()
+    _not_charging(bc, care, bridge)
+    for _ in range(bc.REPLUG_TRIES):
+        care._last_replug.pop("kitchen", None)
+        _report(care, bridge, 50)
+        _run_tasks(care)
+    care._last_replug.pop("kitchen", None)
+    calls = len(charger["calls"])
+    st = _report(care, bridge, 50)
+    _run_tasks(care)
+    assert len(charger["calls"]) == calls and "10 W" in st["warning"]
+    bridge._telemetry["kitchen"]["charging"] = True
+    _report(care, bridge, 52)
+    assert "kitchen" not in care._replug_tries
