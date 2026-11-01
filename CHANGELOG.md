@@ -14,7 +14,7 @@ Actions reach their target: taps wait for the connection, and video, casting and
 
 ### Home Assistant Integration
 - **Video and notifications reach the panel:** HA keeps them until the panel acknowledges them, re-sends, wakes the panel (over MQTT, then with its charger plug) and delivers them the moment it's back; the Video player shows buffering until the panel plays. A cast to a sleeping panel starts once it has woken up. See [Delivery](docs/mqtt_topics.md#delivery).
-- **Battery care:** a panel that refuses the charger (plug on, iPad not charging, e.g. "Charging is not supported with this accessory") gets it re-plugged after a minute off, at most hourly; wakes that power-cycle a plug that is already on keep it off for a minute too. Optional presence: works only while someone is home. Configure in options → Battery care; switch, level numbers and a status sensor per panel.
+- **Battery care:** a panel that refuses the charger (plug on, iPad not charging, e.g. "Charging is not supported with this accessory") gets it re-plugged after a minute off, at most hourly; wakes that power-cycle a plug that is already on keep it off for a minute too.
 - See [Delivery](docs/mqtt_topics.md#delivery) for the protocol (`cid` on commands, `rid` + `mqttdash/dev/<id>/ack` on requests); panels and integrations of 0.6.0 keep working with each other.
 
 ## 0.6.0 - 2026-10-31
