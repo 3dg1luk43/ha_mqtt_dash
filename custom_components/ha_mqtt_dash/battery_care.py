@@ -215,6 +215,17 @@ class BatteryCare:
         await self._charger_wake(device_id, cfg, sleep_after=False)
         return True
 
+    def start_request_wake(self, device_id: str) -> bool:
+        """A request (video, notification) isn't getting through: wake the panel by
+        power if it has a charger plug. Runs in the background (the plug may stay
+        off for a minute); False when there's no way."""
+        cfg = self.settings(device_id)
+        if (not cfg["charger"] or (self._pending.get(device_id) or {}).get("kind") == "wake"
+                or device_id in self._replugging or self._charger_on(cfg["charger"]) is None):
+            return False
+        self.hass.async_create_task(self._charger_wake(device_id, cfg, sleep_after=False))
+        return True
+
     # ── charger wake ───────────────────────────────────────────────────────
     async def _switch(self, charger: str, on: bool) -> None:
         await self.hass.services.async_call("homeassistant", "turn_on" if on else "turn_off",

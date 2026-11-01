@@ -13,9 +13,10 @@ The entire integration uses a fixed `mqttdash/*` namespace — no custom bases o
 | `mqttdash/dev/<device_id>/settings` | HA → iPad | Yes | Device settings (brightness, orientation, keep-awake, screensaver) |
 | `mqttdash/dev/<device_id>/notify` | HA → iPad | No | Push notification payload |
 | `mqttdash/dev/<device_id>/heartbeat` | HA → iPad | Yes | Periodic freshness beat (`{"ts":<unix>,"seq":<n>}`, ~30 s) |
-| `mqttdash/dev/<device_id>/request` | both | No | App requests (snapshot, onboard); HA requests (`wake`, `report`) |
+| `mqttdash/dev/<device_id>/request` | both | No | App requests (snapshot, onboard); HA requests (`wake`, `report`, `sleep`, video) |
+| `mqttdash/dev/<device_id>/ack` | iPad → HA | No | `{"rid"}`: the panel got a request or notification that carries an id (see [Delivery](#delivery)) |
 | `mqttdash/dev/<device_id>/camera` | iPad → HA | No | Camera viewer heartbeat `{"entity_id","active","width","interval"}` (~15 s while shown) |
-| `mqttdash/dev/<device_id>/debug` | → iPad | No | Diagnostics (screenshot / tap / page); only honored with "Verbose MQTT log" on |
+| `mqttdash/dev/<device_id>/debug` | → iPad | No | Diagnostics (screenshot, optionally delayed / tap / page / `test_command` through the command outbox); only honored with "Verbose MQTT log" on |
 | `mqttdash/cmd/<entity_id>` | iPad → HA | No | Widget action commands (only for entities that are controllable widgets in a profile) |
 | `mqttdash/statestream/<domain>/<object>/state` | HA → iPad | Yes | Entity state mirror |
 | `mqttdash/statestream/<domain>/<object>/attributes/<key>` | HA → iPad | Yes | Entity attribute mirror (lists/dicts as JSON, datetimes ISO 8601, `None` as empty) |
@@ -92,7 +93,7 @@ Published non-retained to `mqttdash/dev/<device_id>/notify`:
 { "title": "Laundry", "message": "Washing machine done" }
 ```
 
-`title` is optional. The app shows a banner overlay and dismisses the screensaver if active.
+`title` is optional. The app shows a banner overlay and dismisses the screensaver if active. A sleeping panel gets it over its background link, turns its screen on and shows it. HA adds a `rid` and re-sends until the panel acknowledges it (see [Delivery](#delivery)).
 
 ### Freshness heartbeat (HA → iPad)
 
@@ -110,10 +111,10 @@ versions that never publish a heartbeat simply leave the watchdog dormant.
 
 ### Commands (iPad → HA)
 
-Published non-retained to `mqttdash/cmd/<entity_id>`:
+Published non-retained with QoS 1 to `mqttdash/cmd/<entity_id>`; each carries a `cid` (see [Delivery](#delivery)):
 
 ```json
-{ "action": "turn_on" }
+{ "action": "turn_on", "cid": "kitchen-6ae7235b-1" }
 { "action": "turn_off" }
 { "action": "toggle" }
 { "action": "press" }
@@ -151,9 +152,21 @@ Same topic, from HA:
 ```json
 { "action": "wake" }
 { "action": "report" }
+{ "action": "sleep" }
+{ "action": "play_video", "url": "http://…/master.m3u8", "title": "…", "start": 30, "rid": "6ece03d5" }
+{ "action": "video_control", "cmd": "pause", "rid": "…" }
+{ "action": "stop_video", "rid": "…" }
 ```
 
-`wake` turns the screen on (via the kiosk tweak). `report` publishes battery / charging telemetry without waking the screen. Both reach a sleeping panel through its background link.
+`wake` turns the screen on (via the kiosk tweak). `report` publishes battery / charging telemetry without waking the screen. `sleep` locks it again after a battery check. All reach a sleeping panel through its background link; a video request turns the screen on and starts once the app is in front.
+
+## Delivery
+
+MQTT only reaches a panel whose link is up, and a link can die without either side noticing (Wi-Fi asleep, the broker keeps a sleeping panel's session for 15 min). So both directions confirm what matters:
+
+- **Taps (iPad → HA):** a command is published with QoS 1 and kept until the broker's PUBACK. A tap while the link is down reconnects at once; no PUBACK within 5 s means the link is dead: the app reconnects and sends it again. While commands wait, reconnects are retried every 2 s, and the panel shows "Reconnecting… N actions waiting". A command older than 2 min is dropped (with a notice). HA runs each `cid` once, so a command sent twice switches nothing twice.
+- **Video and notifications (HA → iPad):** HA adds a `rid` and keeps the request until the panel publishes `{"rid": …}` to `mqttdash/dev/<device_id>/ack`. Unanswered, it is re-sent (after 4, 10 and 20 s, then every 15 s), the panel is asked to `wake` after 4 s and, if it has a charger plug in Battery care, woken by power after 12 s (at most every 3 min). Anything waiting goes out again the moment the panel shows up (hello, status, telemetry). Time to live: `play_video` 3 min, `stop_video` 1 min, `video_control` 30 s, notifications 15 min. A stop or a pause never wakes a panel. The panel acknowledges every copy and acts on the first.
+- `wake`, `report` and `sleep` have no `rid`: Battery care has its own timeouts and fallbacks.
 
 ---
 

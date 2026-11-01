@@ -4,7 +4,7 @@ All notable changes to iPad MQTT Dashboard (integration, editor and the iPad app
 
 ---
 
-## 0.6.0 - 2026-10-31
+## 0.6.0 - 2026-11-01
 
 Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, and a kiosk you can leave.
 
@@ -24,6 +24,8 @@ Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, a
 - The sleep link is also set up when the app starts behind the lock screen (kiosk auto-launch after a respring or reboot); before, iOS suspended it with no link and Wi-Fi dropped.
 - HA's `screensaver_timeout` setting (settings topic) sets the screensaver; 0 turns it off.
 - Connecting runs in the background: with the HA host down the dashboard no longer freezes for up to 12 s per retry, and locking the panel can't get the app killed. Launch and wake connect once instead of twice.
+- **Taps always arrive:** a tap while the connection is down reconnects at once and is sent as soon as the link is back (up to 2 min later). Commands are confirmed by the broker; an unconfirmed one means the link is dead, so the app reconnects and sends it again (HA runs it once). Any touch while offline reconnects right away. Banner: "Reconnecting… 1 action waiting", a short "Connected" when it's back, a notice if an action expired. A Mealie card that failed to load retries once reconnected.
+- Notifications reach a sleeping panel: it turns its screen on and shows them.
 
 ### Kiosk tweak 1.2
 - Home button works normally (iOS Settings reachable); returns to the dashboard after 2 min idle on the home screen. Wake still skips the lock screen; banners still suppressed.
@@ -41,6 +43,7 @@ Redesigned cards, reliable reconnects, HA-relayed camera frames and album art, a
 - **Dashboard editor inside HA:** admin-only panel at `/mqttdash-editor` without HA toolbar (full content area), sidebar entry optional (options → Open the dashboard editor); linked from the integration options and each panel's device page. Uses HA's login over admin-only WebSocket commands (`ha_mqtt_dash/devices`, `get_profile`, `apply_profile`). Loads the panel's current layout in its orientation, follows the HA theme, fits the window (icon rail and drawer on smaller screens).
 - **Wake screen** and **Check battery** buttons per panel; a panel that's unreachable over MQTT is woken with its charger plug.
 - **Battery care:** switches the charger plug between a start/stop level (default 35–80 %). Readings come over MQTT; only an unanswering panel is woken by power (quietly, rate limited) and locked again afterwards, with the plug restored. Fail-safe charging when a wake goes unanswered or after 4 h without a report. A panel that refuses the charger (plug on, iPad not charging, e.g. "Charging is not supported with this accessory") gets it re-plugged after a minute off, at most hourly; wakes that power-cycle a plug that is already on keep it off for a minute too. Optional presence: works only while someone is home. Configure in options → Battery care; switch, level numbers and a status sensor per panel.
+- **Video and notifications reach the panel:** HA keeps them until the panel acknowledges them, re-sends, wakes the panel (over MQTT, then with its charger plug) and delivers them the moment it's back; the Video player shows buffering until the panel plays. A cast to a sleeping panel starts once it has woken up. See [Delivery](docs/mqtt_topics.md#delivery).
 - **Last contact** diagnostic sensor per panel: when it last sent anything, its link state and the last charger wake.
 - Media player commands for volume, mute, output (`select_source`), shuffle and repeat, validated and limited to allowlisted entities.
 - Album art / print thumbnails → `mqttdash/art/<entity_id>`; camera frames → `mqttdash/camera/<entity_id>/frame` on demand.
